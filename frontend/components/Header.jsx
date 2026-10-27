@@ -10,6 +10,7 @@ import { Button } from "./ui/button";
 import Link from "next/link";
 import Image from "next/image";
 import { Refrigerator, Cookie } from "lucide-react";
+import UserDropdown from "./UserDropdown";
 
 const Header = async () => {
   const user = null; // Replace with actual user authentication logic
@@ -80,7 +81,7 @@ const Header = async () => {
             {/* Signed-in User */}
             <Show when="signed-in">
               {/* How to Cook */}
-              <UserButton />
+              <UserDropdown />
             </Show>
           </Suspense>
         </div>
