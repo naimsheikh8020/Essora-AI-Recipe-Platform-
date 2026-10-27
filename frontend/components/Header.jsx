@@ -8,42 +8,45 @@ import {
 import { Suspense } from "react";
 import { Button } from "./ui/button";
 import Link from "next/link";
+import Image from "next/image";
+import { Refrigerator, Cookie } from "lucide-react";
 
-const Header = () => {
+const Header = async () => {
+  const user = null; // Replace with actual user authentication logic
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/80 backdrop-blur-md supports-backdrop-filter:bg-stone-50/60">
-      <nav className="container mx-auto flex h-16 items-center justify-between px-4">
+      <nav className="container mx-auto flex h-16 py-10 items-center justify-between px-4">
         {/* Logo */}
         <Link
-          href="/"
-          className="shrink-0 text-xl font-bold tracking-tight text-stone-900"
+          href={user ? "/dashboard" : "/"}
         >
-          Essora
+          <Image
+            src="/essora_logo.png"
+            alt="Logo"
+            width={60}
+            height={60}
+            className="w-16"
+          />
         </Link>
 
         {/* Navigation Links */}
-        <div className="hidden items-center gap-6 text-sm font-medium text-stone-600 md:flex">
-          <Link
-            href="/"
-            className="transition-colors hover:text-orange-600"
-          >
-            Home
-          </Link>
-
+        <div className="hidden md:flex items-center space-x-8 text-sm font-medium text-stone-600">
           <Link
             href="/recipes"
-            className="transition-colors hover:text-orange-600"
+            className="hover:text-orange-600 transition-colors flex gap-1.5 items-center"
           >
-            Recipes
+            <Cookie className="w-4 h-4" />
+            My Recipes
           </Link>
-
           <Link
-            href="/meal-planner"
-            className="transition-colors hover:text-orange-600"
+            href="/pantry"
+            className="hover:text-orange-600 transition-colors flex gap-1.5 items-center"
           >
-            Meal Planner
+            <Refrigerator className="w-4 h-4" />
+            My Pantry
           </Link>
         </div>
+
 
         {/* Authentication */}
         <div className="flex shrink-0 items-center gap-2">
@@ -76,6 +79,7 @@ const Header = () => {
 
             {/* Signed-in User */}
             <Show when="signed-in">
+              {/* How to Cook */}
               <UserButton />
             </Show>
           </Suspense>
