@@ -1,31 +1,88 @@
-import { Show, SignInButton, SignUpButton, UserButton } from '@clerk/nextjs'
-import { Suspense } from 'react'
+
+import {
+  Show,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+} from "@clerk/nextjs";
+import { Suspense } from "react";
+import { Button } from "./ui/button";
+import Link from "next/link";
 
 const Header = () => {
   return (
-    <div>
-      <header className="fixed top-0 w-full border-b border-stone-200 bg-stone-50/80 backdrop-blur-md z-50 supports-backdrop-filter:bg-stone-50/60">
-        <nav className='container mx-auto px-4 h-16 flex items-center justify-between'>
-          logo
-          <div>Nav Links</div>
-          <Suspense fallback={<div>Loading...</div>}>
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/80 backdrop-blur-md supports-backdrop-filter:bg-stone-50/60">
+      <nav className="container mx-auto flex h-16 items-center justify-between px-4">
+        {/* Logo */}
+        <Link
+          href="/"
+          className="shrink-0 text-xl font-bold tracking-tight text-stone-900"
+        >
+          Essora
+        </Link>
+
+        {/* Navigation Links */}
+        <div className="hidden items-center gap-6 text-sm font-medium text-stone-600 md:flex">
+          <Link
+            href="/"
+            className="transition-colors hover:text-orange-600"
+          >
+            Home
+          </Link>
+
+          <Link
+            href="/recipes"
+            className="transition-colors hover:text-orange-600"
+          >
+            Recipes
+          </Link>
+
+          <Link
+            href="/meal-planner"
+            className="transition-colors hover:text-orange-600"
+          >
+            Meal Planner
+          </Link>
+        </div>
+
+        {/* Authentication */}
+        <div className="flex shrink-0 items-center gap-2">
+          <Suspense
+            fallback={
+              <div className="h-9 w-20 animate-pulse rounded-full bg-stone-200" />
+            }
+          >
             <Show when="signed-out">
-              <SignInButton />
-              <SignUpButton>
-                <button className="bg-purple-700 text-white rounded-full font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 cursor-pointer">
-                  Sign Up
-                </button>
+              {/* Sign In Modal */}
+              <SignInButton mode="modal">
+                <Button
+                  variant="ghost"
+                  className="cursor-pointer font-medium text-stone-600 hover:bg-orange-50 hover:text-orange-600"
+                >
+                  Sign In
+                </Button>
+              </SignInButton>
+
+              {/* Sign Up Modal */}
+              <SignUpButton mode="modal">
+                <Button
+                  variant="primary"
+                  className="cursor-pointer rounded-full px-6"
+                >
+                  Get Started
+                </Button>
               </SignUpButton>
             </Show>
+
+            {/* Signed-in User */}
             <Show when="signed-in">
               <UserButton />
             </Show>
           </Suspense>
-        </nav>
+        </div>
+      </nav>
+    </header>
+  );
+};
 
-      </header>
-    </div>
-  )
-}
-
-export default Header
+export default Header;
