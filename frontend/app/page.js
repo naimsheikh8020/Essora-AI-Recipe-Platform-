@@ -6,7 +6,7 @@ export default function Home() {
     <div>
       <h1 className="text-3xl font-bold underline">Hello world!</h1>
       <Button variant="outline">Button</Button>
-      <Button variant="destructive">Destructive</Button>
+      <Button variant="primary">Primary</Button>
     </div>
   );
 }
