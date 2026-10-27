@@ -3,10 +3,10 @@ import Image from "next/image";
 
 export default function Home() {
   return (
-    <div>
-      <h1 className="text-3xl font-bold underline">Hello world!</h1>
-      <Button variant="outline">Button</Button>
-      <Button variant="primary">Primary</Button>
+    <div className="min-h-screen bg-stone-50 text-stone-900">
+     <section className="pt-32 pb-20 px-4">
+      <Button variant="primary" size="xl">Primary</Button>
+     </section>
     </div>
   );
 }
