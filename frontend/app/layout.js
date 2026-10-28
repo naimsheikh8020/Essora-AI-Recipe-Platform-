@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import "./globals.css";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import SmoothScroll from "@/components/SmoothScroll";
 import { neobrutalism } from "@clerk/themes";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -21,19 +22,21 @@ export default function RootLayout({ children }) {
         theme: neobrutalism,
       }}
     >
-      <html lang="en" suppressHydrationWarning>
-        <body className={inter.className} suppressHydrationWarning>
-          <Suspense
-            fallback={
-              <header className="fixed inset-x-0 top-0 z-50 h-16 border-b border-stone-200 bg-stone-50/80" />
-            }
-          >
-            <Header />
-          </Suspense>
+      <html lang="en">
+        <body className={inter.className}>
+          <SmoothScroll>
+            <Suspense
+              fallback={
+                <header className="fixed inset-x-0 top-0 z-50 h-16 border-b border-stone-200 bg-stone-50/80" />
+              }
+            >
+              <Header />
+            </Suspense>
 
-          <main className="min-h-screen pt-16">{children}</main>
+            <main className="min-h-screen pt-16">{children}</main>
 
-          <Footer />
+            <Footer />
+          </SmoothScroll>
         </body>
       </html>
     </ClerkProvider>
