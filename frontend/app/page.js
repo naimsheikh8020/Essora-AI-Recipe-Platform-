@@ -8,7 +8,15 @@ export default function Home() {
       <section className="pt-32 pb-20 px-4">
         <Image src="/essora_logo.png" alt="Logo" width={60} height={60} />
         <Button variant="primary" size="xl">Primary</Button>
-        <PricingTable />
+        <PricingTable checkoutProps={{
+          appearance:{
+            elements: {
+              drawerRoot:{
+                zIndex: 2000,
+              }
+            }
+          }
+        }}/>
       </section>
     </div>
   );
