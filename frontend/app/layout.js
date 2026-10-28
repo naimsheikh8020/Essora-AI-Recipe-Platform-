@@ -1,6 +1,7 @@
 
 import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { Suspense } from "react";
 
 import "./globals.css";
 import Header from "@/components/Header";
@@ -16,12 +17,20 @@ export const metadata = {
 
 export default function RootLayout({ children }) {
   return (
-    <ClerkProvider  appearance={{
-    theme: neobrutalism,
-  }}>
+    <ClerkProvider
+      appearance={{
+        theme: neobrutalism,
+      }}
+    >
       <html lang="en" suppressHydrationWarning>
         <body className={inter.className}>
-          <Header />
+          <Suspense
+            fallback={
+              <header className="fixed inset-x-0 top-0 z-50 h-16 border-b border-stone-200 bg-stone-50/80" />
+            }
+          >
+            <Header />
+          </Suspense>
 
           <main className="min-h-screen pt-16">
             {children}
@@ -33,5 +42,3 @@ export default function RootLayout({ children }) {
     </ClerkProvider>
   );
 }
-
-

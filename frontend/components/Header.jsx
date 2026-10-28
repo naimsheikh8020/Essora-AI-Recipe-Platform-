@@ -3,7 +3,7 @@ import {
   Show,
   SignInButton,
   SignUpButton,
-  UserButton,
+  
 } from "@clerk/nextjs";
 import { Suspense } from "react";
 import { Button } from "./ui/button";
@@ -14,7 +14,7 @@ import UserDropdown from "./UserDropdown";
 import { checkUser } from "@/lib/checkUser";
 
 const Header = async () => {
-  const user = await checkUser(); // Replace with actual user authentication logic
+  const user = await checkUser(); 
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/80 backdrop-blur-md supports-backdrop-filter:bg-stone-50/60">
       <nav className="container mx-auto flex h-16 py-10 items-center justify-between px-4">
@@ -92,3 +92,6 @@ const Header = async () => {
 };
 
 export default Header;
+
+
+

@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { PricingTable } from "@clerk/nextjs";
 import Image from "next/image";
 
 export default function Home() {
@@ -7,6 +8,7 @@ export default function Home() {
       <section className="pt-32 pb-20 px-4">
         <Image src="/essora_logo.png" alt="Logo" width={60} height={60} />
         <Button variant="primary" size="xl">Primary</Button>
+        <PricingTable />
       </section>
     </div>
   );
