@@ -1,4 +1,3 @@
-
 import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Suspense } from "react";
@@ -23,7 +22,7 @@ export default function RootLayout({ children }) {
       }}
     >
       <html lang="en" suppressHydrationWarning>
-        <body className={inter.className}>
+        <body className={inter.className} suppressHydrationWarning>
           <Suspense
             fallback={
               <header className="fixed inset-x-0 top-0 z-50 h-16 border-b border-stone-200 bg-stone-50/80" />
@@ -32,9 +31,7 @@ export default function RootLayout({ children }) {
             <Header />
           </Suspense>
 
-          <main className="min-h-screen pt-16">
-            {children}
-          </main>
+          <main className="min-h-screen pt-16">{children}</main>
 
           <Footer />
         </body>
