@@ -1,102 +1,126 @@
-
 import {
   Show,
   SignInButton,
   SignUpButton,
-
 } from "@clerk/nextjs";
+import { auth } from "@clerk/nextjs/server";
 import { Suspense } from "react";
 import { Button } from "./ui/button";
 import Link from "next/link";
 import Image from "next/image";
 import { Refrigerator, Cookie, Sparkles } from "lucide-react";
 import UserDropdown from "./UserDropdown";
-import { checkUser } from "@/lib/checkUser";
 import PricingModal from "./PricingModal";
 import { Badge } from "./ui/badge";
+import { checkUser } from "@/lib/checkUser";
+
+async function SubscriptionBadge() {
+  const user = await checkUser();
+
+  if (!user) return null;
+
+  const isPro = user.subscriptionTier === "pro";
+
+  return (
+    <PricingModal subscriptionTier={user.subscriptionTier}>
+      <Badge
+        variant="outline"
+        className={`flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-all ${
+          isPro
+            ? "border-none bg-gradient-to-r from-orange-600 to-amber-500 text-white shadow-sm"
+            : "border border-stone-200 bg-stone-200/50 text-stone-600 hover:border-stone-300 hover:bg-stone-300/50"
+        }`}
+      >
+        <Sparkles
+          className={`h-3 w-3 ${
+            isPro ? "fill-white/20 text-white" : "text-stone-500"
+          }`}
+        />
+        <span>{isPro ? "Pro Chef" : "Free Plan"}</span>
+      </Badge>
+    </PricingModal>
+  );
+}
+
+function SubscriptionBadgeFallback() {
+  return (
+    <div className="h-8 w-24 animate-pulse rounded-full bg-stone-200" />
+  );
+}
 
 const Header = async () => {
-  const user = await checkUser();
+  // Only resolve Clerk authentication here; don't wait for Strapi.
+  const { userId } = await auth();
+
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/80 backdrop-blur-md supports-backdrop-filter:bg-stone-50/60">
-      <nav className="max-w-6xl mx-auto flex h-16 py-10 items-center justify-between px-4">
-        {/* Logo */}
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/90 backdrop-blur-xl">
+      <nav className="mx-auto flex h-16 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
+        {/* Logo: dashboard for signed-in users, homepage otherwise */}
         <Link
-          href={user ? "/dashboard" : "/"}
+          href={userId ? "/dashboard" : "/"}
+          aria-label="Essora home"
+          className="flex shrink-0 items-center"
         >
           <Image
             src="/essora_logo.png"
-            alt="Logo"
+            alt="Essora"
             width={60}
             height={60}
-            className="w-16"
+            priority
+            className="h-12 w-auto object-contain"
           />
         </Link>
 
-        {/* Navigation Links */}
-        <div className="hidden md:flex items-center space-x-8 text-sm font-medium text-stone-600">
+        {/* Navigation links */}
+        <div className="hidden items-center gap-6 text-sm font-medium text-stone-600 md:flex lg:gap-8">
           <Link
             href="/recipes"
-            className="hover:text-orange-600 transition-colors flex gap-1.5 items-center"
+            className="flex items-center gap-1.5 transition-colors hover:text-orange-600"
           >
-            <Cookie className="w-4 h-4" />
+            <Cookie className="h-4 w-4" />
             My Recipes
           </Link>
+
           <Link
             href="/pantry"
-            className="hover:text-orange-600 transition-colors flex gap-1.5 items-center"
+            className="flex items-center gap-1.5 transition-colors hover:text-orange-600"
           >
-            <Refrigerator className="w-4 h-4" />
+            <Refrigerator className="h-4 w-4" />
             My Pantry
           </Link>
         </div>
 
+        {/* Authentication and profile */}
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <Show when="signed-out">
+            <SignInButton mode="modal">
+              <Button
+                variant="ghost"
+                className="font-medium text-stone-600 hover:bg-orange-50 hover:text-orange-600"
+              >
+                Sign In
+              </Button>
+            </SignInButton>
 
-        {/* Authentication */}
-        <div className="flex shrink-0 items-center gap-2">
-          <Suspense
-            fallback={
-              <div className="h-9 w-20 animate-pulse rounded-full bg-stone-200" />
-            }
-          >
-            <Show when="signed-out">
-              {/* Sign In Modal */}
-              <SignInButton mode="modal">
-                <Button
-                  variant="ghost"
-                  className="cursor-pointer font-medium text-stone-600 hover:bg-orange-50 hover:text-orange-600"
-                >
-                  Sign In
-                </Button>
-              </SignInButton>
+            <SignUpButton mode="modal">
+              <Button
+                variant="primary"
+                className="cursor-pointer rounded-full px-4 sm:px-6"
+              >
+                Get Started
+              </Button>
+            </SignUpButton>
+          </Show>
 
-              {/* Sign Up Modal */}
-              <SignUpButton mode="modal">
-                <Button
-                  variant="primary"
-                  className="cursor-pointer rounded-full px-6"
-                >
-                  Get Started
-                </Button>
-              </SignUpButton>
-            </Show>
+          <Show when="signed-in">
+            {/* Only this badge waits for Strapi */}
+            <Suspense fallback={<SubscriptionBadgeFallback />}>
+              <SubscriptionBadge />
+            </Suspense>
 
-            {/* Signed-in User */}
-            <Show when="signed-in">
-              {/* How to Cook */}
-              {user && <PricingModal subscriptionTier={user.subscriptionTier}>
-                <Badge variant="outline"
-                  className={`flex h-8 px-3 gap-1.5 rounded-full text-xs font-semibold transition-all ${user.subscriptionTier === "pro"
-                      ? "bg-linear-to-r from-orange-600 to-amber-500 text-white border-none shadow-sm"
-                      : "bg-stone-200/50 text-stone-600 border border-stone-200 cursor-pointer hover:bg-stone-300/50 hover:border-stone-300"
-                    }`}>
-                  <Sparkles className={`h-3 w-3 ${user.subscriptionTier === "pro" ? "text-white fill-white/20" : "text-stone-500"} `} />
-                  <span>{user.subscriptionTier === "pro" ? "Pro Chef" : "Free Plan"}</span>
-                </Badge>
-              </PricingModal>}
-              <UserDropdown />
-            </Show>
-          </Suspense>
+            {/* Keep your existing profile dropdown */}
+            <UserDropdown />
+          </Show>
         </div>
       </nav>
     </header>
@@ -104,6 +128,3 @@ const Header = async () => {
 };
 
 export default Header;
-
-
-

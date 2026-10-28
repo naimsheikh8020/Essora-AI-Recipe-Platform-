@@ -117,7 +117,7 @@ export const checkUser = async () => {
 
     return newUser;
   } catch (error) {
-    console.error("❌ Error in checkUser:", error.message);
+    console.log("❌ Error in checkUser:", error.message);
     return null;
   }
 };
