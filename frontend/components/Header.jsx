@@ -19,7 +19,7 @@ const Header = async () => {
   const user = await checkUser();
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/80 backdrop-blur-md supports-backdrop-filter:bg-stone-50/60">
-      <nav className="container mx-auto flex h-16 py-10 items-center justify-between px-4">
+      <nav className="max-w-6xl mx-auto flex h-16 py-10 items-center justify-between px-4">
         {/* Logo */}
         <Link
           href={user ? "/dashboard" : "/"}
