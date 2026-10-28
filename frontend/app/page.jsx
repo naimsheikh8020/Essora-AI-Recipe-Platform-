@@ -22,7 +22,6 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import PricingSection from "@/components/PricingSection";
 
 export default async function Home() {
 
@@ -42,22 +41,23 @@ export default async function Home() {
                 className="mb-6 inline-flex max-w-full items-center rounded-full border-orange-200 bg-orange-50 px-3 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-orange-700 sm:px-4 sm:text-xs sm:tracking-[0.16em]"
               >
                 <Flame className="mr-1.5 h-3.5 w-3.5 shrink-0 sm:h-4 sm:w-4" />
-                Your personal AI cooking assistant
+                Your fridge has more potential than you think
               </Badge>
 
               <h1 className="mx-auto mb-6 max-w-3xl text-[clamp(2.35rem,8vw,3.5rem)] font-semibold leading-[1.02] tracking-[-0.055em] sm:text-6xl md:text-7xl lg:mx-0 lg:text-[5rem] xl:text-[5.4rem]">
-                Less food waste.
+                Stop wondering
                 <br />
                 <span className="font-serif font-medium italic text-orange-600">
-                  More delicious
+                  what to cook.
                 </span>
                 <br />
-                possibilities.
+                Start creating.
               </h1>
 
               <p className="mx-auto mb-8 max-w-xl text-base leading-7 text-stone-600 sm:text-lg sm:leading-8 md:text-xl lg:mx-0">
-                Your fridge is full of possibilities. Discover what to cook
-                with the ingredients you already have, powered by AI.
+                Turn the ingredients you already have into meals you&apos;ll love.
+                Essora uses AI to discover personalized recipes, reduce food waste,
+                and help you make the most of every grocery trip.
               </p>
 
               <div className="flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:items-center lg:justify-start">
@@ -66,7 +66,7 @@ export default async function Home() {
                     size="xl"
                     className="h-12 w-full rounded-full bg-orange-600 px-6 text-sm font-semibold text-white shadow-lg shadow-orange-600/20 transition-all duration-300 hover:-translate-y-1 hover:bg-orange-700 sm:h-14 sm:w-auto sm:px-8 sm:text-base"
                   >
-                    Start cooking for free
+                    Find My Next Meal
                     <ArrowRight className="ml-2 h-4 w-4 sm:h-5 sm:w-5" />
                   </Button>
                 </Link>
@@ -75,7 +75,7 @@ export default async function Home() {
                   href="#how-it-works"
                   className="inline-flex min-h-12 items-center justify-center gap-2 rounded-full px-5 py-3 text-sm font-medium text-stone-600 transition-colors hover:text-orange-700"
                 >
-                  See how it works
+                  Discover How It Works
                   <ArrowDown className="h-4 w-4" />
                 </a>
               </div>
@@ -95,9 +95,8 @@ export default async function Home() {
 
                 <span>
                   <strong className="font-semibold text-stone-900">
-                    Cook smarter
-                  </strong>{" "}
-                  with what you have.
+                    Make every ingredient count.
+                  </strong>
                 </span>
               </div>
             </div>
@@ -111,7 +110,7 @@ export default async function Home() {
               <div className="relative aspect-[4/4.7] w-full overflow-hidden rounded-[1.5rem] border border-stone-200 bg-stone-100 shadow-xl shadow-stone-900/10 sm:rounded-[2rem] sm:shadow-2xl">
                 <Image
                   src="/pasta-dish.png"
-                  alt="Fresh tomato basil pasta ready to serve"
+                  alt="Fresh tomato basil pasta made with everyday ingredients"
                   fill
                   priority
                   sizes="(max-width: 639px) calc(100vw - 32px), (max-width: 1023px) 80vw, 45vw"
@@ -122,7 +121,7 @@ export default async function Home() {
 
                 <div className="absolute left-3 top-3 flex max-w-[calc(100%-24px)] items-center gap-2 rounded-full border border-white/30 bg-white/90 px-3 py-2 text-[10px] font-semibold text-stone-800 shadow-lg backdrop-blur-md sm:left-5 sm:top-5 sm:px-4 sm:text-xs">
                   <Sparkles className="h-3.5 w-3.5 shrink-0 text-orange-600 sm:h-4 sm:w-4" />
-                  Made with what you have
+                  Recipes made for your kitchen
                 </div>
 
                 {/* Floating recipe card */}
@@ -130,7 +129,7 @@ export default async function Home() {
                   <div className="mb-3 flex items-start justify-between gap-2 sm:mb-4 sm:gap-3">
                     <div className="min-w-0 flex-1">
                       <p className="mb-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-orange-700 sm:text-xs sm:tracking-widest">
-                        Tonight&apos;s inspiration
+                        Your next favorite meal
                       </p>
 
                       <h2 className="break-words text-sm font-semibold leading-snug tracking-tight sm:text-lg md:text-xl">
@@ -180,10 +179,10 @@ export default async function Home() {
 
                   <div className="min-w-0">
                     <p className="text-xs font-semibold lg:text-sm">
-                      Less food waste
+                      Less waste. More flavor.
                     </p>
                     <p className="text-[10px] leading-4 text-stone-500 lg:text-xs">
-                      Use what&apos;s in your fridge
+                      Turn forgotten ingredients into delicious meals.
                     </p>
                   </div>
                 </div>
