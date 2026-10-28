@@ -11,9 +11,10 @@ import Link from "next/link";
 import Image from "next/image";
 import { Refrigerator, Cookie } from "lucide-react";
 import UserDropdown from "./UserDropdown";
+import { checkUser } from "@/lib/checkUser";
 
 const Header = async () => {
-  const user = null; // Replace with actual user authentication logic
+  const user = await checkUser(); // Replace with actual user authentication logic
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/80 backdrop-blur-md supports-backdrop-filter:bg-stone-50/60">
       <nav className="container mx-auto flex h-16 py-10 items-center justify-between px-4">
