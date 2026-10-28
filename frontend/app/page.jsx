@@ -1,7 +1,8 @@
+import PricingSection from "@/components/PricingSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { FEATURES, SITE_STATS } from "@/lib/data";
+import { FEATURES, HOW_IT_WORKS_STEPS, SITE_STATS } from "@/lib/data";
 import { PricingTable } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
 import { ArrowRight, Clock, Flame, Star, Users } from "lucide-react";
@@ -125,6 +126,7 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* Features */}
       <section className="py-24 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="mb-16">
@@ -168,6 +170,43 @@ export default async function Home() {
         </div>
       </section>
 
+      {/* How It Works */}
+      <section className="py-24 px-4 border-y-2 border-stone-200 bg-stone-900 text-stone-50">
+        <div className="max-w-5xl mx-auto">
+          <h2 className="text-5xl md:text-6xl font-bold mb-16">
+            Cook in 3 Steps
+          </h2>
+
+          <div className="space-y-12">
+            {HOW_IT_WORKS_STEPS.map((item, i) => (
+              <div key={i}>
+                <div className="flex gap-6 items-start">
+                  <Badge
+                    variant="outline"
+                    className="text-6xl font-bold text-orange-500 border-none bg-transparent p-0 h-auto"
+                  >
+                    {item.step}
+                  </Badge>
+                  <div>
+                    <h3 className="text-2xl font-bold mb-3">{item.title}</h3>
+                    <p className="text-lg text-stone-400 font-light">
+                      {item.desc}
+                    </p>
+                  </div>
+                </div>
+                {i < HOW_IT_WORKS_STEPS.length - 1 && (
+                  <hr className="my-8 bg-stone-700" />
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing - Now Using Component */}
+      <section className="py-24 px-4">
+        <PricingSection subscriptionTier={subscriptionTier} />
+      </section>
     </div>
   );
 }
