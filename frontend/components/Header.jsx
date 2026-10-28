@@ -12,6 +12,7 @@ import Image from "next/image";
 import { Refrigerator, Cookie } from "lucide-react";
 import UserDropdown from "./UserDropdown";
 import { checkUser } from "@/lib/checkUser";
+import PricingModal from "./PricingModal";
 
 const Header = async () => {
   const user = await checkUser(); 
@@ -82,6 +83,7 @@ const Header = async () => {
             {/* Signed-in User */}
             <Show when="signed-in">
               {/* How to Cook */}
+              { user && <PricingModal></PricingModal>}
               <UserDropdown />
             </Show>
           </Suspense>
