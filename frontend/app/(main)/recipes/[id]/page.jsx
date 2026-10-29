@@ -4,13 +4,14 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { getRecipeDetails } from "@/actions/mealbd.action";
+import RecipeDetailsSkeleton from "@/components/RecipeDetailsSkeleton";
 
 export default function RecipeDetailsPage({ params }) {
   return (
     <Suspense
       fallback={
         <div className="mx-auto max-w-6xl px-6 py-20 text-center">
-          Loading recipe...
+          <RecipeDetailsSkeleton />
         </div>
       }
     >
