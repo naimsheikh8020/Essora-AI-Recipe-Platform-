@@ -1,6 +1,6 @@
 
 import { Suspense } from "react";
-import RecipeGrid from "@/components/RecipeGrid";
+import RecipeGrid from "@/components/RecipeGrid.jsx";
 import { getMealsByArea } from "@/actions/mealbd.action";
 
 export default function CuisineRecipesPage({ params }) {

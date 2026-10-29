@@ -1,6 +1,17 @@
+"use client";
+
 import Link from "next/link";
 import Image from "next/image";
-import { Clock, Users, ChefHat } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChefHat,
+  Clock3,
+  CookingPot,
+  Heart,
+  Sparkles,
+  Users,
+} from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -13,24 +24,29 @@ import {
 } from "@/components/ui/card";
 
 export default function RecipeCard({ recipe, variant = "default" }) {
-  // Handle different recipe data structures
-  const getRecipeData = () => {
+  if (!recipe) return null;
 
-    // For MealDB recipes (category/cuisine pages)
+  const getRecipeData = () => {
+    // TheMealDB recipes
     if (recipe.strMeal) {
       return {
         title: recipe.strMeal,
         image: recipe.strMealThumb,
         href: `/recipes/${recipe.idMeal}`,
-        showImage: true,
+        category: recipe.strCategory,
+        cuisine: recipe.strArea,
+        description: recipe.strInstructions,
+        showImage: Boolean(recipe.strMealThumb),
+        isMealDB: true,
       };
     }
 
-
-    // For AI-generated pantry recipes
-    if (recipe.matchPercentage) {
+    // AI-generated pantry recipes
+    if (recipe.matchPercentage !== undefined) {
       return {
         title: recipe.title,
+        image: recipe.imageUrl,
+        href: `/recipe?cook=${encodeURIComponent(recipe.title)}`,
         description: recipe.description,
         category: recipe.category,
         cuisine: recipe.cuisine,
@@ -39,326 +55,189 @@ export default function RecipeCard({ recipe, variant = "default" }) {
         servings: recipe.servings,
         matchPercentage: recipe.matchPercentage,
         missingIngredients: recipe.missingIngredients || [],
-        image: recipe.imageUrl, // Add image support
-        href: `/recipe?cook=${encodeURIComponent(recipe.title)}`,
-        showImage: !!recipe.imageUrl, // Show if image exists
+        showImage: Boolean(recipe.imageUrl),
       };
     }
 
-    // For Strapi recipes (saved recipes, search results)
-    if (recipe) {
-      return {
-        title: recipe.title,
-        description: recipe.description,
-        category: recipe.category,
-        cuisine: recipe.cuisine,
-        prepTime: recipe.prepTime,
-        cookTime: recipe.cookTime,
-        servings: recipe.servings,
-        image: recipe.imageUrl,
-        href: `/recipe?cook=${encodeURIComponent(recipe.title)}`,
-        showImage: !!recipe.imageUrl,
-      };
-    }
-
-    return {};
+    // Strapi recipes
+    return {
+      title: recipe.title,
+      image: recipe.imageUrl,
+      href: `/recipe?cook=${encodeURIComponent(recipe.title || "")}`,
+      description: recipe.description,
+      category: recipe.category,
+      cuisine: recipe.cuisine,
+      prepTime: recipe.prepTime,
+      cookTime: recipe.cookTime,
+      servings: recipe.servings,
+      showImage: Boolean(recipe.imageUrl),
+    };
   };
 
   const data = getRecipeData();
 
-  // Variant: grid (for category/cuisine pages with images)
-  if (variant === "grid") {
-    return (
-      <Link href={data.href}>
-        <Card className="rounded-none overflow-hidden border-stone-200 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 cursor-pointer group pt-0">
-          {/* Image */}
-          {data.showImage ? (
-            <div className="relative aspect-square">
-              <Image
-                src={data.image}
-                alt={data.title}
-                fill
-                className="object-cover"
-                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-              />
+  if (!data.title || !data.href) return null;
 
-              {/* Hover Overlay */}
-              <div className="absolute inset-0 bg-linear-to-t from-black/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity">
-                <div className="absolute bottom-0 left-0 right-0 p-4">
-                  <p className="text-white text-sm font-medium">
-                    Click to view recipe
-                  </p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            // Fallback gradient background when no image
-            <div className="relative aspect-square bg-gradient-to-br from-orange-400 via-amber-400 to-yellow-400 flex items-center justify-center">
-              <ChefHat className="w-20 h-20 text-white/30" />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent" />
-            </div>
-          )}
+  const totalTime =
+    (Number.parseInt(data.prepTime, 10) || 0) +
+    (Number.parseInt(data.cookTime, 10) || 0);
 
-          {/* Title */}
-          <CardHeader>
-            <CardTitle className="text-lg font-bold text-stone-900 group-hover:text-orange-600 transition-colors line-clamp-2">
-              {data.title}
-            </CardTitle>
-          </CardHeader>
-        </Card>
-      </Link>
-    );
-  }
+  const isGrid = variant === "grid";
+  const isPantry = variant === "pantry";
+  const isList = variant === "list";
 
-  // Variant: pantry (for AI-generated suggestions with match percentage)
-  if (variant === "pantry") {
-    return (
-      <Card className="rounded-none border-stone-200 hover:shadow-xl hover:-translate-y-1 transition-all duration-300 overflow-hidden">
-        {/* Image at top (if available) */}
-        {data.showImage && (
-          <div className="relative aspect-video">
-            <Image
-              src={data.image}
-              alt={data.title}
-              fill
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-            />
-            {/* Match Percentage Badge on Image */}
-            {data.matchPercentage && (
-              <div className="absolute top-4 right-4">
-                <Badge
-                  className={`${data.matchPercentage >= 90
-                      ? "bg-green-600"
-                      : data.matchPercentage >= 75
-                        ? "bg-orange-600"
-                        : "bg-stone-600"
-                    } text-white text-lg px-3 py-1.5 shadow-lg`}
-                >
-                  {data.matchPercentage}% Match
-                </Badge>
-              </div>
-            )}
+  const imageSizes = isList
+    ? "(max-width: 768px) 100vw, 220px"
+    : "(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw";
+
+  return (
+    <Card
+      className={`group relative flex h-full flex-col overflow-hidden rounded-[1.4rem] border border-stone-200/80 bg-white p-0 shadow-[0_3px_16px_-8px_rgba(41,37,36,0.12)] transition-all duration-300 hover:-translate-y-1 hover:border-orange-200 hover:shadow-[0_18px_40px_-18px_rgba(154,80,24,0.24)] ${
+        isList ? "sm:flex-row" : ""
+      }`}
+    >
+      {/* Food photography */}
+      <Link
+        href={data.href}
+        aria-label={`View ${data.title} recipe`}
+        className={`relative block shrink-0 overflow-hidden bg-[#F5EBDD] ${
+          isList
+            ? "aspect-[16/10] w-full sm:aspect-auto sm:w-56"
+            : isGrid
+              ? "aspect-[4/3] w-full"
+              : "aspect-[16/10] w-full"
+        }`}
+      >
+        {data.showImage ? (
+          <Image
+            src={data.image}
+            alt={data.title}
+            fill
+            sizes={imageSizes}
+            className="object-cover transition-transform duration-700 ease-out group-hover:scale-105"
+          />
+        ) : (
+          <div className="flex h-full min-h-48 items-center justify-center bg-gradient-to-br from-orange-100 via-amber-50 to-stone-100">
+            <ChefHat className="h-16 w-16 text-orange-300" strokeWidth={1.1} />
           </div>
         )}
 
-        <CardHeader>
-          <div className="flex justify-between items-start">
-            <div className="flex-1">
-              <div className="flex flex-wrap gap-2 mb-3">
-                {data.cuisine && (
-                  <Badge
-                    variant="outline"
-                    className="text-orange-600 border-orange-200 capitalize"
-                  >
-                    {data.cuisine}
-                  </Badge>
-                )}
-                {data.category && (
-                  <Badge
-                    variant="outline"
-                    className="text-stone-600 border-stone-200 capitalize"
-                  >
-                    {data.category}
-                  </Badge>
-                )}
-              </div>
-            </div>
-            {/* Match Percentage Badge (if no image) */}
-            {!data.showImage && data.matchPercentage && (
-              <div className="flex flex-col items-end gap-1">
-                <Badge
-                  className={`${data.matchPercentage >= 90
-                      ? "bg-green-600"
-                      : data.matchPercentage >= 75
-                        ? "bg-orange-600"
-                        : "bg-stone-600"
-                    } text-white text-lg px-3 py-1`}
-                >
-                  {data.matchPercentage}%
-                </Badge>
-                <span className="text-xs text-stone-500">Match</span>
-              </div>
-            )}
+        {/* Image gradient */}
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-black/5 opacity-70" />
+
+        {/* Category label */}
+        {data.category && (
+          <div className="absolute left-4 top-4">
+            <Badge className="rounded-full border border-white/60 bg-white/95 px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-stone-800 shadow-sm hover:bg-white">
+              {data.category}
+            </Badge>
           </div>
+        )}
 
-          <CardTitle className="text-2xl font-serif font-bold text-stone-900">
-            {data.title}
-          </CardTitle>
+        {/* Match score */}
+        {data.matchPercentage !== undefined && (
+          <div className="absolute right-4 top-4 inline-flex items-center gap-1.5 rounded-full border border-white/40 bg-white/95 px-3 py-1.5 text-xs font-bold text-orange-700 shadow-sm">
+            <Sparkles className="h-3.5 w-3.5" />
+            {data.matchPercentage}% match
+          </div>
+        )}
 
-          {data.description && (
-            <CardDescription className="text-stone-600 leading-relaxed mt-2">
+        {/* View icon */}
+        <div className="absolute bottom-4 right-4 flex h-10 w-10 translate-y-2 items-center justify-center rounded-full bg-white text-stone-900 opacity-0 shadow-lg transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100">
+          <ArrowUpRight className="h-5 w-5" />
+        </div>
+      </Link>
+
+      {/* Card content */}
+      <div className="flex flex-1 flex-col">
+        <CardHeader className="space-y-3 px-5 pb-3 pt-5 sm:px-5">
+          {data.cuisine && (
+            <div className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-[0.13em] text-orange-700">
+              <CookingPot className="h-3.5 w-3.5" />
+              <span className="line-clamp-1">{data.cuisine}</span>
+            </div>
+          )}
+
+          <Link href={data.href} className="block">
+            <CardTitle className="line-clamp-2 font-serif text-xl font-semibold leading-snug tracking-tight text-stone-900 transition-colors duration-200 group-hover:text-orange-700">
+              {data.title}
+            </CardTitle>
+          </Link>
+
+          {data.description && !data.isMealDB && (
+            <CardDescription className="line-clamp-2 text-sm leading-6 text-stone-500">
               {data.description}
             </CardDescription>
           )}
         </CardHeader>
 
-        <CardContent className="space-y-4 flex-1">
-          {/* Time & Servings */}
-          {(data.prepTime || data.cookTime || data.servings) && (
-            <div className="flex gap-4 text-sm text-stone-500">
-              {(data.prepTime || data.cookTime) && (
-                <div className="flex items-center gap-1">
-                  <Clock className="w-4 h-4" />
-                  <span>
-                    {parseInt(data.prepTime || 0) +
-                      parseInt(data.cookTime || 0)}{" "}
-                    mins
-                  </span>
-                </div>
+        <CardContent className="flex-1 px-5 pb-4 pt-1">
+          {/* Recipe information */}
+          {(totalTime > 0 || data.servings) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs font-medium text-stone-500">
+              {totalTime > 0 && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Clock3 className="h-4 w-4 text-orange-600" />
+                  {totalTime} min
+                </span>
               )}
+
               {data.servings && (
-                <div className="flex items-center gap-1">
-                  <Users className="w-4 h-4" />
-                  <span>{data.servings} servings</span>
-                </div>
+                <span className="inline-flex items-center gap-1.5">
+                  <Users className="h-4 w-4 text-orange-600" />
+                  {data.servings} servings
+                </span>
               )}
             </div>
           )}
 
-          {/* Missing Ingredients */}
-          {data.missingIngredients && data.missingIngredients.length > 0 && (
-            <div className="p-4 bg-orange-50 border border-orange-100">
-              <h4 className="text-sm font-semibold text-orange-900 mb-2">
-                You&apos;ll need:
-              </h4>
-              <div className="flex flex-wrap gap-2">
-                {data.missingIngredients.map((ingredient, i) => (
+          {/* Pantry ingredients */}
+          {isPantry && data.missingIngredients?.length > 0 && (
+            <div className="mt-4 rounded-xl border border-orange-100 bg-orange-50/70 p-3.5">
+              <p className="mb-2 text-xs font-semibold text-stone-800">
+                Ingredients you&apos;ll need
+              </p>
+
+              <div className="flex flex-wrap gap-1.5">
+                {data.missingIngredients.slice(0, 4).map((ingredient, index) => (
                   <Badge
-                    key={i}
+                    key={`${ingredient}-${index}`}
                     variant="outline"
-                    className="text-orange-700 border-orange-200 bg-white"
+                    className="rounded-full border-orange-200 bg-white px-2.5 text-[11px] font-medium text-stone-600"
                   >
                     {ingredient}
                   </Badge>
                 ))}
+
+                {data.missingIngredients.length > 4 && (
+                  <Badge
+                    variant="outline"
+                    className="rounded-full border-orange-200 bg-white px-2.5 text-[11px] text-stone-600"
+                  >
+                    +{data.missingIngredients.length - 4}
+                  </Badge>
+                )}
               </div>
             </div>
           )}
         </CardContent>
 
-        <CardFooter>
-          <Link href={data.href} className="w-full">
-            <Button className="w-full bg-green-600 hover:bg-green-700 text-white gap-2">
-              <ChefHat className="w-4 h-4" />
-              View Full Recipe
-            </Button>
+        {/* Footer */}
+        <CardFooter className="mt-auto border-t border-stone-100 px-5 py-4">
+          <Link
+            href={data.href}
+            className="flex w-full items-center justify-between gap-3"
+          >
+            <span className="text-sm font-semibold text-stone-800 transition-colors group-hover:text-orange-700">
+              {isPantry ? "View full recipe" : "Explore recipe"}
+            </span>
+
+            <span className="flex h-9 w-9 items-center justify-center rounded-full border border-stone-200 bg-white text-stone-700 transition-all duration-300 group-hover:border-orange-600 group-hover:bg-orange-600 group-hover:text-white">
+              <ArrowUpRight className="h-4 w-4" />
+            </span>
           </Link>
         </CardFooter>
-      </Card>
-    );
-  }
-
-  // Variant: list (for saved recipes, search results)
-  if (variant === "list") {
-    return (
-      <Link href={data.href}>
-        <Card className="rounded-none border-stone-200 hover:shadow-lg hover:border-orange-200 transition-all cursor-pointer group overflow-hidden py-0">
-          <div className="flex flex-col md:flex-row">
-            {/* Image (if available) */}
-            {data.showImage ? (
-              <div className="relative w-full md:w-48 aspect-video md:aspect-square flex-shrink-0">
-                <Image
-                  src={data.image}
-                  alt={data.title}
-                  fill
-                  className="object-cover group-hover:scale-105 transition-transform duration-500"
-                  sizes="(max-width: 768px) 100vw, 192px"
-                />
-              </div>
-            ) : (
-              // Fallback gradient when no image
-              <div className="relative w-full md:w-48 aspect-video md:aspect-square flex-shrink-0 bg-gradient-to-br from-orange-400 to-amber-400 flex items-center justify-center">
-                <ChefHat className="w-12 h-12 text-white/30" />
-              </div>
-            )}
-
-            {/* Content */}
-            <div className="flex-1 py-5">
-              <CardHeader>
-                <div className="flex flex-wrap gap-2 mb-2">
-                  {data.cuisine && (
-                    <Badge
-                      variant="outline"
-                      className="text-orange-600 border-orange-200 capitalize"
-                    >
-                      {data.cuisine}
-                    </Badge>
-                  )}
-                  {data.category && (
-                    <Badge
-                      variant="outline"
-                      className="text-stone-600 border-stone-200 capitalize"
-                    >
-                      {data.category}
-                    </Badge>
-                  )}
-                </div>
-
-                <CardTitle className="text-xl font-bold text-stone-900 group-hover:text-orange-600 transition-colors">
-                  {data.title}
-                </CardTitle>
-
-                {data.description && (
-                  <CardDescription className="line-clamp-2">
-                    {data.description}
-                  </CardDescription>
-                )}
-              </CardHeader>
-
-              {(data.prepTime || data.cookTime || data.servings) && (
-                <CardContent>
-                  <div className="flex gap-4 text-sm text-stone-500 pt-4">
-                    {(data.prepTime || data.cookTime) && (
-                      <div className="flex items-center gap-1">
-                        <Clock className="w-4 h-4" />
-                        <span>
-                          {parseInt(data.prepTime || 0) +
-                            parseInt(data.cookTime || 0)}{" "}
-                          mins
-                        </span>
-                      </div>
-                    )}
-                    {data.servings && (
-                      <div className="flex items-center gap-1">
-                        <Users className="w-4 h-4" />
-                        <span>{data.servings} servings</span>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              )}
-            </div>
-          </div>
-        </Card>
-      </Link>
-    );
-  }
-
-  // Default variant (fallback)
-  return (
-    <Link href={data.href}>
-      <Card className="rounded-none border-stone-200 hover:shadow-lg transition-all cursor-pointer overflow-hidden py-0">
-        {data.showImage && (
-          <div className="relative aspect-video">
-            <Image
-              src={data.image}
-              alt={data.title}
-              fill
-              className="object-cover"
-              sizes="(max-width: 768px) 100vw, 400px"
-            />
-          </div>
-        )}
-        <CardHeader>
-          <CardTitle className="text-lg">{data.title}</CardTitle>
-          {data.description && (
-            <CardDescription className="line-clamp-2">
-              {data.description}
-            </CardDescription>
-          )}
-        </CardHeader>
-      </Card>
-    </Link>
+      </div>
+    </Card>
   );
 }
