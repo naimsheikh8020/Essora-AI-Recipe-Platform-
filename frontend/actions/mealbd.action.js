@@ -24,6 +24,29 @@ export async function getRecipeOfTheDay() {
   }
 }
 
+// Get meals by category
+export async function getMealsByCategory(category) {
+  try {
+    const response = await fetch(`${MEALDB_BASE}/filter.php?c=${category}`, {
+      next: { revalidate: 86400 }, // Cache for 24 hours
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to fetch meals");
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      meals: data.meals || [],
+      category,
+    };
+  } catch (error) {
+    console.error("Error fetching meals by category:", error);
+    throw new Error(error.message || "Failed to load meals");
+  }
+}
+
 // Get all categories
 export async function getCategories() {
   try {
@@ -68,28 +91,79 @@ export async function getAreas() {
   }
 }
 
-// Get meals by category
-export async function getMealsByCategory(category) {
+
+//Get recipe details by ID
+export async function getRecipeDetails(mealId) {
   try {
-    const response = await fetch(`${MEALDB_BASE}/filter.php?c=${category}`, {
-      next: { revalidate: 86400 }, // Cache for 24 hours
-    });
+    if (!mealId || !/^\d+$/.test(String(mealId))) {
+      return {
+        success: false,
+        message: "Invalid recipe ID",
+      };
+    }
+
+    const response = await fetch(
+      `${MEALDB_BASE}/lookup.php?i=${encodeURIComponent(mealId)}`
+    );
 
     if (!response.ok) {
-      throw new Error("Failed to fetch meals");
+      throw new Error("Failed to fetch recipe details");
     }
 
     const data = await response.json();
+    const meal = data.meals?.[0];
+
+    if (!meal) {
+      return {
+        success: false,
+        message: "Recipe not found",
+      };
+    }
+
+    const ingredients = [];
+
+    for (let i = 1; i <= 20; i++) {
+      const ingredient = meal[`strIngredient${i}`]?.trim();
+      const measure = meal[`strMeasure${i}`]?.trim();
+
+      if (ingredient) {
+        ingredients.push({
+          name: ingredient,
+          measure: measure || "",
+        });
+      }
+    }
+
     return {
       success: true,
-      meals: data.meals || [],
-      category,
+      recipe: {
+        id: meal.idMeal,
+        name: meal.strMeal,
+        image: meal.strMealThumb,
+        category: meal.strCategory,
+        area: meal.strArea,
+        country: meal.strCountry,
+        instructions: meal.strInstructions,
+        ingredients,
+        tags: meal.strTags
+          ? meal.strTags.split(",").map((tag) => tag.trim())
+          : [],
+        youtube: meal.strYoutube,
+        source: meal.strSource,
+      },
     };
   } catch (error) {
-    console.error("Error fetching meals by category:", error);
-    throw new Error(error.message || "Failed to load meals");
+    console.error("getRecipeDetails error:", error);
+
+    return {
+      success: false,
+      message: "Unable to load recipe details",
+    };
   }
 }
+
+
+
 
 // Get meals by area
 export async function getMealsByArea(area) {
@@ -113,3 +187,4 @@ export async function getMealsByArea(area) {
     throw new Error(error.message || "Failed to load meals");
   }
 }
+
