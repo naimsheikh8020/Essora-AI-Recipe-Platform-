@@ -1,7 +1,7 @@
 
 export default function RecipeGridSkeleton({ count = 8 }) {
   return (
-    <section className="w-full animate-pulse">
+    <section className="max-w-7xl mx-auto animate-pulse">
       {/* Page heading skeleton */}
       <div className="mb-8 space-y-3">
         <div className="h-8 w-56 rounded-lg bg-neutral-200" />
