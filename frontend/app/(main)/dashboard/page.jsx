@@ -17,7 +17,7 @@ import {
   getAreas,
   getCategories,
   getRecipeOfTheDay,
- 
+
 } from "@/actions/mealbd.action";
 import Link from "next/link";
 
@@ -113,12 +113,12 @@ export default async function DashboardPage() {
               </Badge>
             </div>
 
+          
             <Link
-              href={`/recipe?cook=${encodeURIComponent(
-                recipeOfTheDay.strMeal
-              )}`}
+              href={`/recipes/${recipeOfTheDay.idMeal}`}
               className="group block"
             >
+            
               <article className="grid overflow-hidden rounded-3xl border border-stone-200/80 bg-white shadow-sm transition-all duration-300 hover:border-orange-200 hover:shadow-xl hover:shadow-stone-900/5 md:grid-cols-2">
                 {/* Recipe image */}
                 <div className="relative min-h-[280px] overflow-hidden bg-stone-100 sm:min-h-[380px] md:min-h-[440px]">

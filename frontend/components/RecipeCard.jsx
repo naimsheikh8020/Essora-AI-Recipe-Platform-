@@ -15,15 +15,17 @@ import {
 export default function RecipeCard({ recipe, variant = "default" }) {
   // Handle different recipe data structures
   const getRecipeData = () => {
+
     // For MealDB recipes (category/cuisine pages)
     if (recipe.strMeal) {
       return {
         title: recipe.strMeal,
         image: recipe.strMealThumb,
-        href: `/recipe?cook=${encodeURIComponent(recipe.strMeal)}`,
+        href: `/recipes/${recipe.idMeal}`,
         showImage: true,
       };
     }
+
 
     // For AI-generated pantry recipes
     if (recipe.matchPercentage) {
@@ -126,13 +128,12 @@ export default function RecipeCard({ recipe, variant = "default" }) {
             {data.matchPercentage && (
               <div className="absolute top-4 right-4">
                 <Badge
-                  className={`${
-                    data.matchPercentage >= 90
+                  className={`${data.matchPercentage >= 90
                       ? "bg-green-600"
                       : data.matchPercentage >= 75
-                      ? "bg-orange-600"
-                      : "bg-stone-600"
-                  } text-white text-lg px-3 py-1.5 shadow-lg`}
+                        ? "bg-orange-600"
+                        : "bg-stone-600"
+                    } text-white text-lg px-3 py-1.5 shadow-lg`}
                 >
                   {data.matchPercentage}% Match
                 </Badge>
@@ -167,13 +168,12 @@ export default function RecipeCard({ recipe, variant = "default" }) {
             {!data.showImage && data.matchPercentage && (
               <div className="flex flex-col items-end gap-1">
                 <Badge
-                  className={`${
-                    data.matchPercentage >= 90
+                  className={`${data.matchPercentage >= 90
                       ? "bg-green-600"
                       : data.matchPercentage >= 75
-                      ? "bg-orange-600"
-                      : "bg-stone-600"
-                  } text-white text-lg px-3 py-1`}
+                        ? "bg-orange-600"
+                        : "bg-stone-600"
+                    } text-white text-lg px-3 py-1`}
                 >
                   {data.matchPercentage}%
                 </Badge>
