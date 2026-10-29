@@ -1,3 +1,4 @@
+
 import { Inter } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { Suspense } from "react";
@@ -23,7 +24,10 @@ export default function RootLayout({ children }) {
       }}
     >
       <html lang="en">
-        <body className={inter.className}>
+        <body
+          className={inter.className}
+          suppressHydrationWarning
+        >
           <SmoothScroll>
             <Suspense
               fallback={
