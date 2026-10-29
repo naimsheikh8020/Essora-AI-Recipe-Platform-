@@ -1,5 +1,6 @@
 
 import React from "react";
+import { getCountrySlug } from "@/lib/data/country-name-map";
 import {
   Globe,
   ArrowRight,
@@ -32,9 +33,17 @@ export default async function DashboardPage() {
   const recipeOfTheDay = recipeData?.recipe;
   const categories = categoriesData?.categories || [];
 
+
+  const staticAreas = [
+    {
+      strArea: "Bangladesh",
+      strCountry: "Bangladesh",
+    },
+  ];
+
   const areas = Array.from(
     new Map(
-      (areasData?.areas || [])
+      [...(areasData?.areas || []), ...staticAreas]
         .filter((area) => area?.strArea?.trim())
         .map((area) => [
           area.strArea.trim().toLowerCase(),
@@ -45,6 +54,7 @@ export default async function DashboardPage() {
         ])
     ).values()
   );
+
 
 
   return (
@@ -113,12 +123,12 @@ export default async function DashboardPage() {
               </Badge>
             </div>
 
-          
+
             <Link
               href={`/recipes/${recipeOfTheDay.idMeal}`}
               className="group block"
             >
-            
+
               <article className="grid overflow-hidden rounded-3xl border border-stone-200/80 bg-white shadow-sm transition-all duration-300 hover:border-orange-200 hover:shadow-xl hover:shadow-stone-900/5 md:grid-cols-2">
                 {/* Recipe image */}
                 <div className="relative min-h-[280px] overflow-hidden bg-stone-100 sm:min-h-[380px] md:min-h-[440px]">
@@ -275,54 +285,58 @@ export default async function DashboardPage() {
           </div>
 
 
+
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-            {areas.map((area) => {
-              const flagClass = getCountryFlag(area.strCountry);
+            {areas
+              .filter(
+                (area) => area.strArea.toLowerCase() !== "bangladesh"
+              )
+              .map((area) => {
+                const flagClass = getCountryFlag(area.strCountry);
 
-              return (
-                <Link
-                  key={`${area.strCountry}-${area.strArea}`}
-                  href={`/recipes/cuisine/${area.strArea
-                    .toLowerCase()
-                    .replace(/\s+/g, "-")}`}
-                  className="group"
-                >
-                  <article className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-sm transition-all duration-300 hover:border-orange-200 hover:bg-orange-50/40 hover:shadow-md sm:p-5">
-                    <div className="flex min-w-0 items-center gap-4">
-                      <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-stone-50 transition-colors group-hover:bg-orange-100">
-                        {flagClass ? (
-                          <span
-                            className={`${flagClass} text-3xl`}
-                            role="img"
-                            aria-label={`${area.strCountry} flag`}
-                          />
-                        ) : (
-                          <span
-                            className="text-xs font-semibold text-stone-400"
-                            aria-label="Flag unavailable"
-                          >
-                            N/A
-                          </span>
-                        )}
+                return (
+                  <Link
+                    key={`${area.strCountry}-${area.strArea}`}
+                    href={`/recipes/cuisine/${getCountrySlug(area.strArea)}`}
+                    className="group"
+                  >
+                    <article className="flex items-center justify-between gap-3 rounded-2xl border border-stone-200/80 bg-white p-4 shadow-sm transition-all duration-300 hover:border-orange-200 hover:bg-orange-50/40 hover:shadow-md sm:p-5">
+                      <div className="flex min-w-0 items-center gap-4">
+                        <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-stone-50 transition-colors group-hover:bg-orange-100">
+                          {flagClass ? (
+                            <span
+                              className={`${flagClass} text-3xl`}
+                              role="img"
+                              aria-label={`${area.strCountry} flag`}
+                            />
+                          ) : (
+                            <span
+                              className="text-xs font-semibold text-stone-400"
+                              aria-label="Flag unavailable"
+                            >
+                              N/A
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <h3 className="truncate text-sm font-semibold text-stone-800 transition-colors group-hover:text-orange-600 sm:text-base">
+                            {area.strArea}
+                          </h3>
+
+                          <p className="mt-1 truncate text-xs text-stone-500">
+                            Find the Local Quisine
+                          </p>
+                        </div>
                       </div>
 
-                      <div className="min-w-0">
-                        <h3 className="truncate text-sm font-semibold text-stone-800 transition-colors group-hover:text-orange-600 sm:text-base">
-                          {area.strArea}
-                        </h3>
-
-                        <p className="mt-1 truncate text-xs text-stone-500">
-                          Find the Local Quisine
-                        </p>
-                      </div>
-                    </div>
-
-                    <ArrowRight className="h-4 w-4 shrink-0 text-stone-400 transition-all group-hover:translate-x-1 group-hover:text-orange-600" />
-                  </article>
-                </Link>
-              );
-            })}
+                      <ArrowRight className="h-4 w-4 shrink-0 text-stone-400 transition-all group-hover:translate-x-1 group-hover:text-orange-600" />
+                    </article>
+                  </Link>
+                );
+              })}
           </div>
+
 
 
         </section>

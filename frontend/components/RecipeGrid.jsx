@@ -59,16 +59,19 @@ export default function RecipeGrid({
   const { loading, data, fn: fetchMeals } = useFetch(fetchAction);
 
   useEffect(() => {
-  if (!value) return;
+    if (!value) return;
 
-  const formattedValue = value
-    .replace(/-/g, " ")
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+    const formattedValue = value
+      .replace(/-/g, " ")
+      .replace(/\b\w/g, (char) => char.toUpperCase());
 
-  fetchMeals(formattedValue);
-}, [value, fetchMeals]);
+    fetchMeals(formattedValue);
+  }, [value, fetchMeals]);
 
   const meals = data?.meals || [];
+  console.log("Cuisine value:", value);
+  console.log("Fetch response:", data);
+  console.log("Meals:", meals);
 
   const displayName = (value || "")
     .replace(/-/g, " ")
@@ -78,7 +81,7 @@ export default function RecipeGrid({
   const heading = isCuisine ? "Cuisine" : "Recipes";
 
   return (
-    <main className="min-h-screen bg-[#FAF9F6] pb-20 pt-12 text-stone-900">
+    <main className="min-h-screen bg-[#FAF9F6] pb-20 pt-16 text-stone-900">
       <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
         {/* Back navigation */}
         <Link

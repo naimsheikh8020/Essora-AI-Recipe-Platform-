@@ -2,7 +2,7 @@ import React from 'react'
 
 const MainLayout = ({children}) => {
   return (
-    <div className=''>{children}</div>
+    <div className='min-h-screen'>{children}</div>
   )
 }
 
