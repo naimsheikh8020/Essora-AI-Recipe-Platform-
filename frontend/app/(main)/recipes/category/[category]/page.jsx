@@ -2,6 +2,7 @@
 import { Suspense } from "react";
 import { notFound } from "next/navigation";
 import RecipeGrid from "@/components/RecipeGrid";
+import CategoryRecipesSkeleton from "@/components/CategoryRecipesSkeleton";
 import { getMealsByCategory } from "@/actions/mealbd.action";
 
 function CategoryRecipesContent({ category }) {
@@ -24,7 +25,7 @@ function CategoryRecipesContent({ category }) {
 
 export default async function CategoryRecipesPage({ params }) {
   return (
-    <Suspense fallback={<div className="p-6">Loading recipes...</div>}>
+    <Suspense fallback={<CategoryRecipesSkeleton />}>
       <CategoryRecipesWrapper params={params} />
     </Suspense>
   );
@@ -33,5 +34,9 @@ export default async function CategoryRecipesPage({ params }) {
 async function CategoryRecipesWrapper({ params }) {
   const { category } = await params;
 
-  return <CategoryRecipesContent category={decodeURIComponent(category)} />;
+  return (
+    <CategoryRecipesContent
+      category={decodeURIComponent(category)}
+    />
+  );
 }
