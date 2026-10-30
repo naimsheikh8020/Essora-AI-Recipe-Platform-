@@ -20,6 +20,7 @@ import useFetch from "@/hooks/use-fetch";
 import {
   getPantryItems,
   deletePantryItem,
+  deletePantryItems,
   updatePantryItem,
 } from "@/actions/pantry.actions";
 import { toast } from "sonner";
@@ -31,6 +32,8 @@ export default function PantryPage() {
   const [editingId, setEditingId] = useState(null);
   const [editValues, setEditValues] = useState({ name: "", quantity: "" });
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [deletingId, setDeletingId] = useState(null);
 
   // Fetch pantry items
   const {
@@ -45,6 +48,12 @@ export default function PantryPage() {
     data: deleteData,
     fn: deleteItem,
   } = useFetch(deletePantryItem);
+
+  const {
+    loading: deletingBulk,
+    data: bulkDeleteData,
+    fn: deleteSelectedItems,
+  } = useFetch(deletePantryItems);
 
   // Update item
   const {
@@ -69,9 +78,18 @@ export default function PantryPage() {
   useEffect(() => {
     if (deleteData?.success && !deleting) {
       toast.success("Item removed from pantry");
+      setSelectedIds((ids) => ids.filter((id) => id !== deletingId));
       fetchItems();
     }
   }, [deleteData]);
+
+  useEffect(() => {
+    if (bulkDeleteData?.success && !deletingBulk) {
+      toast.success(bulkDeleteData.message);
+      setSelectedIds([]);
+      fetchItems();
+    }
+  }, [bulkDeleteData]);
 
   // Refresh after update
   useEffect(() => {
@@ -84,9 +102,30 @@ export default function PantryPage() {
 
   // Handle delete
   const handleDelete = async (itemId) => {
+    setDeletingId(itemId);
     const formData = new FormData();
     formData.append("itemId", itemId);
-    await deleteItem(formData);
+    const result = await deleteItem(formData);
+    if (result?.success) {
+      setSelectedIds((ids) => ids.filter((id) => id !== itemId));
+    }
+    setDeletingId(null);
+  };
+
+  const toggleSelected = (itemId) => {
+    setSelectedIds((ids) =>
+      ids.includes(itemId)
+        ? ids.filter((id) => id !== itemId)
+        : [...ids, itemId]
+    );
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+
+    const formData = new FormData();
+    formData.append("itemIds", JSON.stringify(selectedIds));
+    await deleteSelectedItems(formData);
   };
 
   // Start editing
@@ -250,9 +289,24 @@ export default function PantryPage() {
             </div>
 
             {items.length > 0 && (
-              <Badge className="rounded-full border border-stone-200 bg-white px-3 py-1 text-stone-700 hover:bg-white">
-                {items.length} {items.length === 1 ? "item" : "items"}
-              </Badge>
+              <div className="flex items-center gap-2">
+                {selectedIds.length > 0 && (
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    onClick={handleBulkDelete}
+                    disabled={deletingBulk || deletingId !== null}
+                  >
+                    {deletingBulk && (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    )}
+                    Delete {selectedIds.length}
+                  </Button>
+                )}
+                <Badge className="rounded-full border border-stone-200 bg-white px-3 py-1 text-stone-700 hover:bg-white">
+                  {items.length} {items.length === 1 ? "item" : "items"}
+                </Badge>
+              </div>
             )}
           </div>
 
@@ -286,6 +340,17 @@ export default function PantryPage() {
                   key={item.documentId}
                   className="group rounded-2xl border border-stone-200/80 bg-white p-5 shadow-sm transition duration-200 hover:-translate-y-0.5 hover:border-orange-200 hover:shadow-md"
                 >
+                  <label className="mb-3 flex items-center gap-2 text-xs text-stone-500">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(item.documentId)}
+                      onChange={() => toggleSelected(item.documentId)}
+                      disabled={deletingBulk || deletingId !== null}
+                      aria-label={`Select ${item.name}`}
+                      className="h-4 w-4 rounded border-stone-300 accent-orange-600"
+                    />
+                    Select item
+                  </label>
                   {editingId === item.documentId ? (
                     /* Edit Mode */
                     <div className="space-y-4">
@@ -397,11 +462,11 @@ export default function PantryPage() {
                           <button
                             type="button"
                             onClick={() => handleDelete(item.documentId)}
-                            disabled={deleting}
+                            disabled={deletingId !== null || deletingBulk}
                             className="flex h-9 w-9 items-center justify-center rounded-lg text-stone-400 transition hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                             aria-label={`Delete ${item.name}`}
                           >
-                            {deleting ? (
+                            {deletingId === item.documentId ? (
                               <Loader2 className="h-4 w-4 animate-spin" />
                             ) : (
                               <Trash2 className="h-4 w-4" />

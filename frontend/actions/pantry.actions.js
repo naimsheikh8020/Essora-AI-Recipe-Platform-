@@ -126,6 +126,7 @@ Rules:
 
 // Save ingredients to pantry
 export async function saveToPantry(formData) {
+  const startedAt = performance.now();
   try {
     const user = await checkUser();
     if (!user) {
@@ -133,41 +134,51 @@ export async function saveToPantry(formData) {
     }
 
     const ingredientsJson = formData.get("ingredients");
-    const ingredients = JSON.parse(ingredientsJson);
+    let ingredients;
+    try {
+      ingredients = JSON.parse(ingredientsJson);
+    } catch {
+      throw new Error("Invalid ingredients payload");
+    }
 
-    if (!ingredients || ingredients.length === 0) {
+    if (!Array.isArray(ingredients) || ingredients.length === 0) {
       throw new Error("No ingredients to save");
     }
 
-    // Create pantry items in Strapi
-    const savedItems = [];
-    for (const ingredient of ingredients) {
-      const response = await fetch(`${STRAPI_URL}/api/pantry-items`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-        },
-        body: JSON.stringify({
-          data: {
-            name: ingredient.name,
-            quantity: ingredient.quantity,
-            imageUrl: "",
-            owner: user.id,
-          },
-        }),
-      });
+    const requestStartedAt = performance.now();
+    const response = await fetch(`${STRAPI_URL}/api/pantry-items/bulk`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${STRAPI_API_TOKEN}`,
+      },
+      body: JSON.stringify({
+        ownerId: user.id,
+        ingredients: ingredients.map(({ name, quantity }) => ({ name, quantity })),
+      }),
+    });
+    const requestDuration = performance.now() - requestStartedAt;
 
-      if (response.ok) {
-        const data = await response.json();
-        savedItems.push(data.data);
-      }
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Failed to save pantry items:", errorText);
+      throw new Error("Failed to save items");
+    }
+
+    const data = await response.json();
+    const savedCount = data.data?.count || 0;
+
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[saveToPantry] total=${Math.round(performance.now() - startedAt)}ms ` +
+          `strapiRequest=${Math.round(requestDuration)}ms items=${ingredients.length}`
+      );
     }
 
     return {
       success: true,
-      savedItems,
-      message: `Saved ${savedItems.length} items to your pantry!`,
+      savedItems: data.data?.ids || [],
+      message: `Saved ${savedCount} items to your pantry!`,
     };
   } catch (error) {
     console.error("Error saving to pantry:", error);
@@ -227,14 +238,16 @@ export async function addPantryItemManually(formData) {
 
 // Get user's pantry items
 export async function getPantryItems() {
+  const startedAt = performance.now();
   try {
     const user = await checkUser();
     if (!user) {
       throw new Error("User not authenticated");
     }
 
+    const requestStartedAt = performance.now();
     const response = await fetch(
-      `${STRAPI_URL}/api/pantry-items?filters[owner][id][$eq]=${user.id}&sort=createdAt:desc`,
+      `${STRAPI_URL}/api/pantry-items?filters[owner][id][$eq]=${user.id}&sort=createdAt:desc&fields[0]=name&fields[1]=quantity&fields[2]=imageUrl&fields[3]=createdAt&fields[4]=documentId`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
@@ -248,6 +261,12 @@ export async function getPantryItems() {
     }
 
     const data = await response.json();
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[getPantryItems] total=${Math.round(performance.now() - startedAt)}ms ` +
+          `strapiRequest=${Math.round(performance.now() - requestStartedAt)}ms items=${data.data?.length || 0}`
+      );
+    }
 
     const isPro = user.subscriptionTier === "pro";
 
@@ -290,6 +309,75 @@ export async function deletePantryItem(formData) {
   } catch (error) {
     console.error("Error deleting item:", error);
     throw new Error(error.message || "Failed to delete item");
+  }
+}
+
+// Delete multiple pantry items
+export async function deletePantryItems(formData) {
+  try {
+    const user = await checkUser();
+    if (!user) {
+      throw new Error("User not authenticated");
+    }
+
+    let itemIds;
+    try {
+      itemIds = JSON.parse(formData.get("itemIds"));
+    } catch {
+      throw new Error("Invalid item IDs payload");
+    }
+
+    if (!Array.isArray(itemIds) || itemIds.length === 0) {
+      throw new Error("No pantry items selected");
+    }
+
+    const endpoint = `${STRAPI_URL.replace(/\/$/, "")}/api/pantry-items/bulk-delete`;
+    const apiToken = STRAPI_API_TOKEN?.trim();
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiToken}`,
+      },
+      body: JSON.stringify({
+        ownerId: user.id,
+        itemIds,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      if (process.env.NODE_ENV === "development") {
+        console.error(
+          `[deletePantryItems] method=POST endpoint=${endpoint} ` +
+            `status=${response.status} tokenConfigured=${Boolean(apiToken)} ` +
+            `response=${errorText}`
+        );
+      }
+      if (response.status === 403) {
+        throw new Error(
+          "Bulk delete was rejected by Strapi. Restart Strapi and Next.js after enabling the bulkDelete API-token permission."
+        );
+      }
+      throw new Error("Failed to delete pantry items");
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[deletePantryItems] method=POST endpoint=${endpoint} ` +
+          `status=${response.status} tokenConfigured=${Boolean(apiToken)}`
+      );
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      count: data.data?.count || 0,
+      message: `Removed ${data.data?.count || 0} items from your pantry`,
+    };
+  } catch (error) {
+    console.error("Error deleting pantry items:", error);
+    throw new Error(error.message || "Failed to delete pantry items");
   }
 }
 

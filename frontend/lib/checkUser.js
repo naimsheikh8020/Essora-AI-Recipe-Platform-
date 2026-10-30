@@ -23,8 +23,9 @@ export const checkUser = async () => {
 
   try {
     // Check if user exists in Strapi
+    const lookupStartedAt = performance.now();
     const existingUserResponse = await fetch(
-      `${STRAPI_URL}/api/users?filters[clerkId][$eq]=${user.id}`,
+      `${STRAPI_URL}/api/users?filters[clerkId][$eq]=${encodeURIComponent(user.id)}&fields[0]=id&fields[1]=subscriptionTier&fields[2]=clerkId`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
@@ -40,6 +41,7 @@ export const checkUser = async () => {
       return null;
     }
 
+    const lookupDuration = performance.now() - lookupStartedAt;
     const existingUserData = await existingUserResponse.json();
 
     if (existingUserData.length > 0) {
@@ -57,6 +59,9 @@ export const checkUser = async () => {
         });
       }
 
+      if (process.env.NODE_ENV === "development") {
+        console.info(`[checkUser] lookup=${Math.round(lookupDuration)}ms`);
+      }
       return { ...existingUser, subscriptionTier };
     }
 
