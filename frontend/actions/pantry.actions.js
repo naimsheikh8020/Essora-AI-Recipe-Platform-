@@ -1,9 +1,11 @@
 "use server";
 
 import { checkUser } from "@/lib/checkUser";
+import { auth } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { freePantryScans, proTierLimit } from "@/lib/arcjet";
 import { request } from "@arcjet/next";
+import { randomUUID } from "node:crypto";
 
 const STRAPI_URL =
   process.env.NEXT_PUBLIC_STRAPI_URL || "http://localhost:1337";
@@ -11,11 +13,16 @@ const STRAPI_API_TOKEN = process.env.STRAPI_API_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const createPantryRequestId = () => randomUUID();
 
 // Scan image with Gemini Vision
 export async function scanPantryImage(formData) {
+  const startedAt = performance.now();
+  const requestId = createPantryRequestId();
   try {
-    const user = await checkUser();
+    let stageStartedAt = performance.now();
+    const user = await checkUser(requestId);
+    const userLookupDuration = performance.now() - stageStartedAt;
     if (!user) {
       throw new Error("User not authenticated");
     }
@@ -52,9 +59,11 @@ export async function scanPantryImage(formData) {
     }
 
     // Convert image to base64
+    stageStartedAt = performance.now();
     const bytes = await imageFile.arrayBuffer();
     const buffer = Buffer.from(bytes);
     const base64Image = buffer.toString("base64");
+    const imagePreparationDuration = performance.now() - stageStartedAt;
 
     // Call Gemini Vision API
     const model = genAI.getGenerativeModel({ model: "gemini-3.5-flash-lite" });
@@ -80,6 +89,7 @@ Rules:
 - Common pantry staples are acceptable (salt, pepper, oil)
 `;
 
+    stageStartedAt = performance.now();
     const result = await model.generateContent([
       prompt,
       {
@@ -89,9 +99,12 @@ Rules:
         },
       },
     ]);
+    const modelDuration = performance.now() - stageStartedAt;
 
+    stageStartedAt = performance.now();
     const response = await result.response;
     const text = response.text();
+    const responseReadDuration = performance.now() - stageStartedAt;
 
     // Parse JSON response
     let ingredients;
@@ -112,6 +125,17 @@ Rules:
       );
     }
 
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[scanPantryImage] total=${Math.round(performance.now() - startedAt)}ms ` +
+          `userLookup=${Math.round(userLookupDuration)}ms ` +
+          `imagePreparation=${Math.round(imagePreparationDuration)}ms ` +
+          `model=${Math.round(modelDuration)}ms ` +
+          `responseRead=${Math.round(responseReadDuration)}ms ` +
+          `ingredients=${ingredients.length}`
+      );
+    }
+
     return {
       success: true,
       ingredients: ingredients.slice(0, 20),
@@ -127,8 +151,11 @@ Rules:
 // Save ingredients to pantry
 export async function saveToPantry(formData) {
   const startedAt = performance.now();
+  const requestId = createPantryRequestId();
   try {
-    const user = await checkUser();
+    const authStartedAt = performance.now();
+    const user = await checkUser(requestId);
+    const authDuration = performance.now() - authStartedAt;
     if (!user) {
       throw new Error("User not authenticated");
     }
@@ -150,6 +177,7 @@ export async function saveToPantry(formData) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-Essora-Request-Id": requestId,
         Authorization: `Bearer ${STRAPI_API_TOKEN}`,
       },
       body: JSON.stringify({
@@ -165,7 +193,9 @@ export async function saveToPantry(formData) {
       throw new Error("Failed to save items");
     }
 
+    const parseStartedAt = performance.now();
     const data = await response.json();
+    const parseDuration = performance.now() - parseStartedAt;
     const savedCount = data.data?.count || 0;
     const savedItems = data.data?.items || [];
     const ownerIds = savedItems.map((item) => item.owner?.id);
@@ -187,8 +217,10 @@ export async function saveToPantry(formData) {
 
     if (process.env.NODE_ENV === "development") {
       console.info(
-        `[saveToPantry] total=${Math.round(performance.now() - startedAt)}ms ` +
+        `[saveToPantry] requestId=${requestId} total=${Math.round(performance.now() - startedAt)}ms ` +
+          `auth=${Math.round(authDuration)}ms ` +
           `strapiRequest=${Math.round(requestDuration)}ms ` +
+          `responseJson=${Math.round(parseDuration)}ms ` +
           `requested=${ingredients.length} persisted=${savedCount} ` +
           `returned=${savedItems.length} ownerIds=${ownerIds.join(",")}`
       );
@@ -207,8 +239,9 @@ export async function saveToPantry(formData) {
 
 // Add pantry item manually
 export async function addPantryItemManually(formData) {
+  const requestId = createPantryRequestId();
   try {
-    const user = await checkUser();
+    const user = await checkUser(requestId);
     if (!user) {
       throw new Error("User not authenticated");
     }
@@ -224,6 +257,7 @@ export async function addPantryItemManually(formData) {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-Essora-Request-Id": requestId,
         Authorization: `Bearer ${STRAPI_API_TOKEN}`,
       },
       body: JSON.stringify({
@@ -258,42 +292,78 @@ export async function addPantryItemManually(formData) {
 // Get user's pantry items
 export async function getPantryItems() {
   const startedAt = performance.now();
+  const requestId = createPantryRequestId();
   try {
-    const user = await checkUser();
-    if (!user) {
+    const authStartedAt = performance.now();
+    const { userId: clerkUserId, has } = await auth();
+    if (!clerkUserId) {
       throw new Error("User not authenticated");
     }
 
+    const subscriptionTier = has({ plan: "pro" }) ? "pro" : "free";
+    const authDuration = performance.now() - authStartedAt;
     const requestStartedAt = performance.now();
+    let strapiRequestDuration;
     const response = await fetch(
-      `${STRAPI_URL}/api/pantry-items?filters[owner][id][$eq]=${encodeURIComponent(user.id)}&sort=createdAt:desc&fields[0]=name&fields[1]=quantity&fields[2]=imageUrl&fields[3]=createdAt&fields[4]=documentId`,
+      `${STRAPI_URL}/api/pantry-items-owner?clerkId=${encodeURIComponent(clerkUserId)}`,
       {
         headers: {
+          "X-Essora-Request-Id": requestId,
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
         },
         cache: "no-store",
       }
     );
+    strapiRequestDuration = performance.now() - requestStartedAt;
 
-    if (!response.ok) {
+    let data;
+    let responseJsonStartedAt = performance.now();
+    if (response.status === 404) {
+      const user = await checkUser(requestId);
+      if (!user) {
+        throw new Error("User is not registered");
+      }
+
+      const fallbackResponse = await fetch(
+        `${STRAPI_URL}/api/pantry-items-owner?ownerId=${encodeURIComponent(user.id)}`,
+        {
+          headers: {
+            "X-Essora-Request-Id": requestId,
+            Authorization: `******`,
+          },
+          cache: "no-store",
+        }
+      );
+      strapiRequestDuration = performance.now() - requestStartedAt;
+
+      if (!fallbackResponse.ok) {
+        throw new Error("Failed to fetch pantry items");
+      }
+
+      responseJsonStartedAt = performance.now();
+      data = await fallbackResponse.json();
+    } else if (!response.ok) {
       throw new Error("Failed to fetch pantry items");
+    } else {
+      responseJsonStartedAt = performance.now();
+      data = await response.json();
     }
+    const responseJsonDuration = performance.now() - responseJsonStartedAt;
 
-    const data = await response.json();
     if (process.env.NODE_ENV === "development") {
       console.info(
-        `[getPantryItems] total=${Math.round(performance.now() - startedAt)}ms ` +
-          `strapiRequest=${Math.round(performance.now() - requestStartedAt)}ms ` +
-          `userId=${user.id} returned=${data.data?.length || 0}`
+        `[getPantryItems] requestId=${requestId} total=${Math.round(performance.now() - startedAt)}ms ` +
+          `auth=${Math.round(authDuration)}ms ` +
+        `strapiRequest=${Math.round(strapiRequestDuration)}ms ` +
+          `responseJson=${Math.round(responseJsonDuration)}ms ` +
+          `userId=${clerkUserId} returned=${data.data?.length || 0}`
       );
     }
-
-    const isPro = user.subscriptionTier === "pro";
 
     return {
       success: true,
       items: data.data || [],
-      scansLimit: isPro ? "unlimited" : 10,
+      scansLimit: subscriptionTier === "pro" ? "unlimited" : 10,
     };
   } catch (error) {
     console.error("Error fetching pantry:", error);
@@ -303,23 +373,36 @@ export async function getPantryItems() {
 
 // Delete pantry item
 export async function deletePantryItem(formData) {
+  const startedAt = performance.now();
+  const requestId = createPantryRequestId();
   try {
-    const user = await checkUser();
+    const user = await checkUser(requestId);
     if (!user) {
       throw new Error("User not authenticated");
     }
 
     const itemId = formData.get("itemId");
 
-    const response = await fetch(`${STRAPI_URL}/api/pantry-items/${itemId}`, {
-      method: "DELETE",
+    const response = await fetch(
+      `${STRAPI_URL}/api/pantry-items/owned/${itemId}?ownerId=${encodeURIComponent(user.id)}`,
+      {
+        method: "DELETE",
       headers: {
+        "X-Essora-Request-Id": requestId,
         Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-      },
-    });
+        },
+      }
+    );
 
     if (!response.ok) {
       throw new Error("Failed to delete item");
+    }
+
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[deletePantryItem] requestId=${requestId} total=${Math.round(performance.now() - startedAt)}ms ` +
+          `status=${response.status} itemCount=1`
+      );
     }
 
     return {
@@ -334,8 +417,10 @@ export async function deletePantryItem(formData) {
 
 // Delete multiple pantry items
 export async function deletePantryItems(formData) {
+  const startedAt = performance.now();
+  const requestId = createPantryRequestId();
   try {
-    const user = await checkUser();
+    const user = await checkUser(requestId);
     if (!user) {
       throw new Error("User not authenticated");
     }
@@ -353,10 +438,12 @@ export async function deletePantryItems(formData) {
 
     const endpoint = `${STRAPI_URL.replace(/\/$/, "")}/api/pantry-items/bulk-delete`;
     const apiToken = STRAPI_API_TOKEN?.trim();
+    const requestStartedAt = performance.now();
     const response = await fetch(endpoint, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "X-Essora-Request-Id": requestId,
         Authorization: `Bearer ${apiToken}`,
       },
       body: JSON.stringify({
@@ -364,6 +451,7 @@ export async function deletePantryItems(formData) {
         itemIds,
       }),
     });
+    const requestDuration = performance.now() - requestStartedAt;
 
     if (!response.ok) {
       const errorText = await response.text();
@@ -389,7 +477,17 @@ export async function deletePantryItems(formData) {
       );
     }
 
+    const parseStartedAt = performance.now();
     const data = await response.json();
+    const parseDuration = performance.now() - parseStartedAt;
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[deletePantryItems] requestId=${requestId} total=${Math.round(performance.now() - startedAt)}ms ` +
+          `authAndValidation=${Math.round(requestStartedAt - startedAt)}ms ` +
+          `http=${Math.round(requestDuration)}ms responseJson=${Math.round(parseDuration)}ms ` +
+          `status=${response.status} itemCount=${itemIds.length}`
+      );
+    }
     return {
       success: true,
       count: data.data?.count || 0,
@@ -403,8 +501,10 @@ export async function deletePantryItems(formData) {
 
 // Update pantry item
 export async function updatePantryItem(formData) {
+  const startedAt = performance.now();
+  const requestId = createPantryRequestId();
   try {
-    const user = await checkUser();
+    const user = await checkUser(requestId);
     if (!user) {
       throw new Error("User not authenticated");
     }
@@ -413,25 +513,33 @@ export async function updatePantryItem(formData) {
     const name = formData.get("name");
     const quantity = formData.get("quantity");
 
-    const response = await fetch(`${STRAPI_URL}/api/pantry-items/${itemId}`, {
+    const requestStartedAt = performance.now();
+    const response = await fetch(`${STRAPI_URL}/api/pantry-items/owned/${itemId}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json",
+        "X-Essora-Request-Id": requestId,
         Authorization: `Bearer ${STRAPI_API_TOKEN}`,
       },
       body: JSON.stringify({
-        data: {
-          name,
-          quantity,
-        },
+        ownerId: user.id,
+        name,
+        quantity,
       }),
     });
+    const requestDuration = performance.now() - requestStartedAt;
 
     if (!response.ok) {
       throw new Error("Failed to update item");
     }
 
     const data = await response.json();
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[updatePantryItem] requestId=${requestId} total=${Math.round(performance.now() - startedAt)}ms ` +
+          `http=${Math.round(requestDuration)}ms status=${response.status} itemCount=1`
+      );
+    }
 
     return {
       success: true,

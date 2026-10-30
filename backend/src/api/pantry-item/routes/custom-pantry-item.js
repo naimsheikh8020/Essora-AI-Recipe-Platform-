@@ -3,6 +3,11 @@
 module.exports = {
   routes: [
     {
+      method: 'GET',
+      path: '/pantry-items-owner',
+      handler: 'pantry-item.listOwned',
+    },
+    {
       method: 'POST',
       path: '/pantry-items/bulk',
       handler: 'pantry-item.bulkCreate',
@@ -16,6 +21,16 @@ module.exports = {
           scope: ['api::pantry-item.pantry-item.bulkDelete'],
         },
       },
+    },
+    {
+      method: 'PUT',
+      path: '/pantry-items/owned/:id',
+      handler: 'pantry-item.updateOwned',
+    },
+    {
+      method: 'DELETE',
+      path: '/pantry-items/owned/:id',
+      handler: 'pantry-item.deleteOwned',
     },
   ],
 };

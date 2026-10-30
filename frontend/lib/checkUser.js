@@ -29,10 +29,13 @@ const fetchStrapiWithRetry = async (url, options, operation) => {
   throw lastError;
 };
 
-export const checkUser = async () => {
-  const user = await currentUser();
+export const checkUser = async (requestId = "unattributed") => {
+  const startedAt = performance.now();
+  const authStartedAt = performance.now();
+  const { userId, has } = await auth();
+  const authDuration = performance.now() - authStartedAt;
 
-  if (!user) {
+  if (!userId) {
     console.log("user is not found");
     return null;
   }
@@ -42,14 +45,12 @@ export const checkUser = async () => {
     return null;
   }
 
-  const {has} = await auth()
   const subscriptionTier = has({plan: "pro"}) ? "pro" : "free";
-
   try {
     // Check if user exists in Strapi
     const lookupStartedAt = performance.now();
     const existingUserResponse = await fetchStrapiWithRetry(
-      `${STRAPI_URL}/api/users?filters[clerkId][$eq]=${encodeURIComponent(user.id)}&fields[0]=id&fields[1]=subscriptionTier&fields[2]=clerkId`,
+      `${STRAPI_URL}/api/users?filters[clerkId][$eq]=${encodeURIComponent(userId)}&fields[0]=id&fields[1]=subscriptionTier&pagination[pageSize]=1`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
@@ -67,7 +68,9 @@ export const checkUser = async () => {
     }
 
     const lookupDuration = performance.now() - lookupStartedAt;
+    const parseStartedAt = performance.now();
     const existingUserData = await existingUserResponse.json();
+    const parseDuration = performance.now() - parseStartedAt;
 
     if (existingUserData.length > 0) {
       const existingUser = existingUserData[0];
@@ -85,9 +88,20 @@ export const checkUser = async () => {
       }
 
       if (process.env.NODE_ENV === "development") {
-        console.info(`[checkUser] lookup=${Math.round(lookupDuration)}ms`);
+        console.info(
+          `[checkUser] requestId=${requestId} total=${Math.round(performance.now() - startedAt)}ms ` +
+            `auth=${Math.round(authDuration)}ms ` +
+            `strapiLookup=${Math.round(lookupDuration)}ms responseJson=${Math.round(parseDuration)}ms`
+        );
       }
-      return { ...existingUser, subscriptionTier };
+      return { ...existingUser, clerkId: userId, subscriptionTier };
+    }
+
+    const clerkStartedAt = performance.now();
+    const user = await currentUser();
+    const clerkDuration = performance.now() - clerkStartedAt;
+    if (!user || user.id !== userId) {
+      return null;
     }
 
     // Get authenticated role

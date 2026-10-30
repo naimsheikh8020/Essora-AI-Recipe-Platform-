@@ -1,4 +1,7 @@
 module.exports = [
+  {
+    name: 'global::pantry-lifecycle-timing',
+  },
   'strapi::logger',
   'strapi::errors',
   'strapi::security',
@@ -9,4 +12,7 @@ module.exports = [
   'strapi::session',
   'strapi::favicon',
   'strapi::public',
+  {
+    name: 'global::pantry-request-timing',
+  },
 ];

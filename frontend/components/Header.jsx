@@ -12,17 +12,11 @@ import { Refrigerator, Cookie, Sparkles } from "lucide-react";
 import UserDropdown from "./UserDropdown";
 import PricingModal from "./PricingModal";
 import { Badge } from "./ui/badge";
-import { checkUser } from "@/lib/checkUser";
 
-async function SubscriptionBadge() {
-  const user = await checkUser();
-
-  if (!user) return null;
-
-  const isPro = user.subscriptionTier === "pro";
+function SubscriptionBadge({ isPro }) {
 
   return (
-    <PricingModal subscriptionTier={user.subscriptionTier}>
+    <PricingModal subscriptionTier={isPro ? "pro" : "free"}>
       <Badge
         variant="outline"
         className={`flex h-8 cursor-pointer items-center gap-1.5 rounded-full px-3 text-xs font-semibold transition-all ${
@@ -50,7 +44,8 @@ function SubscriptionBadgeFallback() {
 
 const Header = async () => {
   // Only resolve Clerk authentication here; don't wait for Strapi.
-  const { userId } = await auth();
+  const { userId, has } = await auth();
+  const isPro = userId ? has({ plan: "pro" }) : false;
 
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-stone-200 bg-stone-50/90 backdrop-blur-xl">
@@ -113,9 +108,9 @@ const Header = async () => {
           </Show>
 
           <Show when="signed-in">
-            {/* Only this badge waits for Strapi */}
+            {/* The badge uses the plan already resolved from Clerk auth. */}
             <Suspense fallback={<SubscriptionBadgeFallback />}>
-              <SubscriptionBadge />
+              <SubscriptionBadge isPro={isPro} />
             </Suspense>
 
             {/* Keep your existing profile dropdown */}
