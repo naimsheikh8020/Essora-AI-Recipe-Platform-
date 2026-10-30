@@ -35,14 +35,12 @@ export default function AddToPantryModal({ isOpen, onClose, onSuccess }) {
   // Save scanned items
   const {
     loading: saving,
-    data: saveData,
     fn: saveScannedItems,
   } = useFetch(saveToPantry);
 
   // Add manual item
   const {
     loading: adding,
-    data: addData,
     fn: addManualItem,
   } = useFetch(addPantryItemManually);
 
@@ -77,7 +75,13 @@ export default function AddToPantryModal({ isOpen, onClose, onSuccess }) {
 
     const formData = new FormData();
     formData.append("ingredients", JSON.stringify(scannedIngredients));
-    await saveScannedItems(formData);
+    const result = await saveScannedItems(formData);
+
+    if (result?.success) {
+      toast.success(result.message);
+      handleClose();
+      onSuccess?.(result.savedItems);
+    }
   };
 
   // Reset modal state
@@ -88,15 +92,6 @@ export default function AddToPantryModal({ isOpen, onClose, onSuccess }) {
     setManualItem({ name: "", quantity: "" });
     onClose();
   };
-
-  // Handle save success
-  useEffect(() => {
-    if (saveData?.success) {
-      toast.success(saveData.message);
-      handleClose();
-      if (onSuccess) onSuccess();
-    }
-  }, [saveData]);
 
   // Handle manual add
   const handleAddManual = async (e) => {
@@ -109,18 +104,15 @@ export default function AddToPantryModal({ isOpen, onClose, onSuccess }) {
     const formData = new FormData();
     formData.append("name", manualItem.name);
     formData.append("quantity", manualItem.quantity);
-    await addManualItem(formData);
-  };
+    const result = await addManualItem(formData);
 
-  // Handle manual add success
-  useEffect(() => {
-    if (addData?.success) {
+    if (result?.success) {
       toast.success("Item added to pantry!");
       setManualItem({ name: "", quantity: "" });
       handleClose();
-      if (onSuccess) onSuccess();
+      onSuccess?.(result.item ? [result.item] : []);
     }
-  }, [addData]);
+  };
 
   // Remove scanned ingredient
   const removeIngredient = (index) => {

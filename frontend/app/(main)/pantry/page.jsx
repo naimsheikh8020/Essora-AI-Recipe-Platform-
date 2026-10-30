@@ -1,7 +1,6 @@
-/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import {
   Plus,
   Trash2,
@@ -34,6 +33,7 @@ export default function PantryPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
+  const refreshRequestRef = useRef(0);
 
   // Fetch pantry items
   const {
@@ -44,61 +44,38 @@ export default function PantryPage() {
 
   // Delete item
   const {
-    loading: deleting,
-    data: deleteData,
     fn: deleteItem,
   } = useFetch(deletePantryItem);
 
   const {
     loading: deletingBulk,
-    data: bulkDeleteData,
     fn: deleteSelectedItems,
   } = useFetch(deletePantryItems);
 
   // Update item
   const {
     loading: updating,
-    data: updateData,
     fn: updateItem,
   } = useFetch(updatePantryItem);
 
-  // Load items on mount
-  useEffect(() => {
-    fetchItems();
-  }, []);
+  const refreshItems = useCallback(async () => {
+    const requestId = ++refreshRequestRef.current;
+    const result = await fetchItems();
 
-  // Update items when data arrives
-  useEffect(() => {
-    if (itemsData?.success) {
-      setItems(itemsData.items);
+    if (requestId === refreshRequestRef.current && result?.success) {
+      setItems(result.items);
+      setSelectedIds((ids) =>
+        ids.filter((id) => result.items.some((item) => item.documentId === id))
+      );
     }
-  }, [itemsData]);
 
-  // Refresh after delete
-  useEffect(() => {
-    if (deleteData?.success && !deleting) {
-      toast.success("Item removed from pantry");
-      setSelectedIds((ids) => ids.filter((id) => id !== deletingId));
-      fetchItems();
-    }
-  }, [deleteData]);
+    return result;
+  }, [fetchItems]);
 
+  // Load items on mount.
   useEffect(() => {
-    if (bulkDeleteData?.success && !deletingBulk) {
-      toast.success(bulkDeleteData.message);
-      setSelectedIds([]);
-      fetchItems();
-    }
-  }, [bulkDeleteData]);
-
-  // Refresh after update
-  useEffect(() => {
-    if (updateData?.success) {
-      toast.success("Item updated successfully");
-      setEditingId(null);
-      fetchItems();
-    }
-  }, [updateData]);
+    refreshItems();
+  }, [refreshItems]);
 
   // Handle delete
   const handleDelete = async (itemId) => {
@@ -107,7 +84,11 @@ export default function PantryPage() {
     formData.append("itemId", itemId);
     const result = await deleteItem(formData);
     if (result?.success) {
+      setItems((currentItems) =>
+        currentItems.filter((item) => item.documentId !== itemId)
+      );
       setSelectedIds((ids) => ids.filter((id) => id !== itemId));
+      toast.success(result.message);
     }
     setDeletingId(null);
   };
@@ -125,7 +106,20 @@ export default function PantryPage() {
 
     const formData = new FormData();
     formData.append("itemIds", JSON.stringify(selectedIds));
-    await deleteSelectedItems(formData);
+    const result = await deleteSelectedItems(formData);
+
+    if (result?.success) {
+      const deletedIds = new Set(selectedIds);
+      if (result.count === selectedIds.length) {
+        setItems((currentItems) =>
+          currentItems.filter((item) => !deletedIds.has(item.documentId))
+        );
+      } else {
+        await refreshItems();
+      }
+      setSelectedIds([]);
+      toast.success(result.message);
+    }
   };
 
   // Start editing
@@ -143,7 +137,19 @@ export default function PantryPage() {
     formData.append("itemId", editingId);
     formData.append("name", editValues.name);
     formData.append("quantity", editValues.quantity);
-    await updateItem(formData);
+    const result = await updateItem(formData);
+
+    if (result?.success) {
+      setItems((currentItems) =>
+        currentItems.map((item) =>
+          item.documentId === editingId
+            ? { ...item, name: editValues.name, quantity: editValues.quantity }
+            : item
+        )
+      );
+      setEditingId(null);
+      toast.success(result.message);
+    }
   };
 
   // Cancel edit
@@ -152,9 +158,9 @@ export default function PantryPage() {
     setEditValues({ name: "", quantity: "" });
   };
 
-  // Handle modal success (refresh items)
-  const handleModalSuccess = () => {
-    fetchItems();
+  // Reload after adding items so the list always matches the database.
+  const handleModalSuccess = async () => {
+    await refreshItems();
   };
 
   return (
@@ -284,7 +290,7 @@ export default function PantryPage() {
                 Your ingredients
               </h2>
               <p className="mt-1 text-sm text-stone-500">
-                Manage what's available in your kitchen.
+                Manage what&apos;s available in your kitchen.
               </p>
             </div>
 

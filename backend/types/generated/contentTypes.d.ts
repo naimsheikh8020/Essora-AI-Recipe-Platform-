@@ -488,7 +488,7 @@ export interface ApiPantryItemPantryItem extends Struct.CollectionTypeSchema {
     singularName: 'pantry-item';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     createdAt: Schema.Attribute.DateTime;

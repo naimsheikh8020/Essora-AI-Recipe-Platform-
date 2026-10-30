@@ -167,17 +167,36 @@ export async function saveToPantry(formData) {
 
     const data = await response.json();
     const savedCount = data.data?.count || 0;
+    const savedItems = data.data?.items || [];
+    const ownerIds = savedItems.map((item) => item.owner?.id);
+    const expectedOwnerId = Number(user.id);
+
+    if (
+      savedCount !== ingredients.length ||
+      savedItems.length !== ingredients.length ||
+      ownerIds.some((ownerId) => ownerId !== expectedOwnerId)
+    ) {
+      console.error("Pantry bulk save returned an incomplete result:", {
+        requested: ingredients.length,
+        savedCount,
+        returnedItems: savedItems.length,
+        ownerIds,
+      });
+      throw new Error("Pantry items were not persisted correctly");
+    }
 
     if (process.env.NODE_ENV === "development") {
       console.info(
         `[saveToPantry] total=${Math.round(performance.now() - startedAt)}ms ` +
-          `strapiRequest=${Math.round(requestDuration)}ms items=${ingredients.length}`
+          `strapiRequest=${Math.round(requestDuration)}ms ` +
+          `requested=${ingredients.length} persisted=${savedCount} ` +
+          `returned=${savedItems.length} ownerIds=${ownerIds.join(",")}`
       );
     }
 
     return {
       success: true,
-      savedItems: data.data?.ids || [],
+      savedItems,
       message: `Saved ${savedCount} items to your pantry!`,
     };
   } catch (error) {
@@ -247,7 +266,7 @@ export async function getPantryItems() {
 
     const requestStartedAt = performance.now();
     const response = await fetch(
-      `${STRAPI_URL}/api/pantry-items?filters[owner][id][$eq]=${user.id}&sort=createdAt:desc&fields[0]=name&fields[1]=quantity&fields[2]=imageUrl&fields[3]=createdAt&fields[4]=documentId`,
+      `${STRAPI_URL}/api/pantry-items?filters[owner][id][$eq]=${encodeURIComponent(user.id)}&sort=createdAt:desc&fields[0]=name&fields[1]=quantity&fields[2]=imageUrl&fields[3]=createdAt&fields[4]=documentId`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
@@ -264,7 +283,8 @@ export async function getPantryItems() {
     if (process.env.NODE_ENV === "development") {
       console.info(
         `[getPantryItems] total=${Math.round(performance.now() - startedAt)}ms ` +
-          `strapiRequest=${Math.round(performance.now() - requestStartedAt)}ms items=${data.data?.length || 0}`
+          `strapiRequest=${Math.round(performance.now() - requestStartedAt)}ms ` +
+          `userId=${user.id} returned=${data.data?.length || 0}`
       );
     }
 

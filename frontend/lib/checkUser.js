@@ -5,6 +5,30 @@ const STRAPI_URL =
 
 const STRAPI_API_TOKEN = process.env.STRAPI_API_TOKEN;
 
+const fetchStrapiWithRetry = async (url, options, operation) => {
+  let lastError;
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      lastError = error;
+      if (process.env.NODE_ENV === "development") {
+        console.error(
+          `[checkUser] ${operation} request failed ` +
+            `(attempt ${attempt}/2): ${error.message}`
+        );
+      }
+
+      if (attempt < 2) {
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+    }
+  }
+
+  throw lastError;
+};
+
 export const checkUser = async () => {
   const user = await currentUser();
 
@@ -24,14 +48,15 @@ export const checkUser = async () => {
   try {
     // Check if user exists in Strapi
     const lookupStartedAt = performance.now();
-    const existingUserResponse = await fetch(
+    const existingUserResponse = await fetchStrapiWithRetry(
       `${STRAPI_URL}/api/users?filters[clerkId][$eq]=${encodeURIComponent(user.id)}&fields[0]=id&fields[1]=subscriptionTier&fields[2]=clerkId`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
         },
         cache: "no-store",
-      }
+      },
+      "user lookup"
     );
 
     if (!existingUserResponse.ok) {
@@ -122,7 +147,10 @@ export const checkUser = async () => {
 
     return newUser;
   } catch (error) {
-    console.log("❌ Error in checkUser:", error.message);
+    console.error(
+      `[checkUser] Strapi request failed for ${STRAPI_URL}; ` +
+        "authentication state was not changed."
+    );
     return null;
   }
 };

@@ -7,7 +7,7 @@
     "displayName": "Pantry Item"
   },
   "options": {
-    "draftAndPublish": true
+    "draftAndPublish": false
   },
   "pluginOptions": {},
   "attributes": {

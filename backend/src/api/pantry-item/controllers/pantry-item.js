@@ -48,7 +48,7 @@ module.exports = createCoreController('api::pantry-item.pantry-item', ({ strapi 
       }
 
       seenNames.add(duplicateKey);
-      normalizedIngredients.push({ name, quantity, imageUrl: '', owner: Number(ownerId) });
+      normalizedIngredients.push({ name, quantity, imageUrl: '' });
     }
 
     const userLookupStartedAt = performance.now();
@@ -63,26 +63,65 @@ module.exports = createCoreController('api::pantry-item.pantry-item', ({ strapi 
     }
 
     const databaseStartedAt = performance.now();
-    const result = await strapi.db.transaction(async ({ trx }) =>
-      strapi.db.query('api::pantry-item.pantry-item').createMany({
-        data: normalizedIngredients,
-        transacting: trx,
-      })
-    );
+    const pantryQuery = strapi.db.query('api::pantry-item.pantry-item');
+    const createdIds = [];
+
+    try {
+      for (const ingredient of normalizedIngredients) {
+        const item = await pantryQuery.create({
+          data: {
+            ...ingredient,
+            owner: { connect: [Number(ownerId)] },
+          },
+        });
+        createdIds.push(item.id);
+      }
+    } catch (error) {
+      if (createdIds.length > 0) {
+        await pantryQuery.deleteMany({ where: { id: { $in: createdIds } } });
+      }
+      throw error;
+    }
+
     const databaseDuration = performance.now() - databaseStartedAt;
+    const savedItems = await pantryQuery.findMany({
+      where: {
+        id: { $in: createdIds },
+        owner: { id: Number(ownerId) },
+      },
+      populate: {
+        owner: {
+          select: ['id', 'documentId'],
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const ownerIds = savedItems.map((item) => item.owner?.id);
+    const allItemsLinkedToOwner =
+      savedItems.length === normalizedIngredients.length &&
+      ownerIds.length === normalizedIngredients.length &&
+      ownerIds.every((id) => id === Number(ownerId));
+
+    if (!allItemsLinkedToOwner) {
+      await pantryQuery.deleteMany({ where: { id: { $in: createdIds } } });
+      throw new Error('Pantry items were created without the expected owner relation');
+    }
 
     if (process.env.NODE_ENV === 'development') {
       strapi.log.info(
         `[pantry.bulkCreate] total=${Math.round(performance.now() - startedAt)}ms ` +
           `userLookup=${Math.round(userLookupDuration)}ms ` +
-          `database=${Math.round(databaseDuration)}ms items=${normalizedIngredients.length}`
+          `database=${Math.round(databaseDuration)}ms ` +
+          `created=${savedItems.length} ownerIds=${ownerIds.join(',')}`
       );
     }
 
     ctx.body = {
       data: {
-        count: result.count,
-        ids: result.ids,
+        count: savedItems.length,
+        ids: createdIds,
+        items: savedItems,
       },
     };
   },
