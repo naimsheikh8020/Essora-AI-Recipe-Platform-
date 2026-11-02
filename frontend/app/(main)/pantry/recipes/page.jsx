@@ -132,7 +132,7 @@ function saveCachedRecipes(userId, fingerprint, data) {
 
 function subscribeToCache(callback) {
   if (typeof window === "undefined") {
-    return () => {};
+    return () => { };
   }
 
   window.addEventListener(CACHE_EVENT, callback);
@@ -251,7 +251,7 @@ export default function PantryRecipesPage() {
       !currentUserId ||
       !currentFingerprint ||
       generationStartedForFingerprint.current ===
-        `${currentUserId}:${currentFingerprint}`
+      `${currentUserId}:${currentFingerprint}`
     ) {
       return;
     }
@@ -316,8 +316,8 @@ export default function PantryRecipesPage() {
 
   const recipesData =
     !isRefreshing &&
-    fetchedRecipesData?.userId === currentUserId &&
-    fetchedRecipesData?.fingerprint === currentFingerprint
+      fetchedRecipesData?.userId === currentUserId &&
+      fetchedRecipesData?.fingerprint === currentFingerprint
       ? fetchedRecipesData
       : !isRefreshing
         ? cachedRecipesData
@@ -513,11 +513,11 @@ export default function PantryRecipesPage() {
               </Badge>
 
               <h3 className="text-2xl font-bold text-stone-900 sm:text-3xl">
-                You've reached your monthly limit
+                You&apos;ve reached your monthly limit
               </h3>
 
               <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-600">
-                You've used all your free AI recipe recommendations. Upgrade
+                You&apos;ve used all your free AI recipe recommendations. Upgrade
                 to Pro and discover unlimited ways to cook with your pantry.
               </p>
 
@@ -544,7 +544,7 @@ export default function PantryRecipesPage() {
             </div>
 
             <h3 className="text-xl font-bold text-stone-900">
-              We couldn't find your recipes
+              We couldn&apos;t find your recipes
             </h3>
 
             <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-stone-500">
@@ -577,7 +577,7 @@ export default function PantryRecipesPage() {
             </h3>
 
             <p className="mx-auto mt-3 max-w-md text-sm leading-7 text-stone-500">
-              Add some ingredients to your pantry and we'll help you discover
+              Add some ingredients to your pantry and we&apos;ll help you discover
               delicious meals you can prepare.
             </p>
 
