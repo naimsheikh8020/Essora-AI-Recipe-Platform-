@@ -340,12 +340,8 @@ function RecipeContent() {
                   fileName={`${recipe.title.replace(/\s+/g, "-").toLowerCase()}.pdf`}
                 >
                   {({ loading }) => (
-                    <Button
-                      variant="outline"
-                      disabled={loading}
-                      className="rounded-xl border-stone-300 bg-white px-5 text-stone-700 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-700"
-                    >
-                      <Download className="h-4 w-4" />
+                    <Button disabled={loading}>
+                      <Download className="w-4 h-4" />
                       {loading ? "Preparing PDF..." : "Download PDF"}
                     </Button>
                   )}
