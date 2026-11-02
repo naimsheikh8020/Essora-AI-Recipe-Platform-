@@ -6,6 +6,13 @@ import { freeMealRecommendations, proTierLimit } from "@/lib/arcjet";
 import { request } from "@arcjet/next";
 import { fetchRecipeImage } from "@/lib/recipe-image-cache";
 import { createHash } from "node:crypto";
+import {
+  clearRecipeDetailInFlight,
+  getRecipeDetailCache,
+  getRecipeDetailInFlight,
+  setRecipeDetailCache,
+  setRecipeDetailInFlight,
+} from "@/lib/recipe-detail-cache";
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const STRAPI_URL =
   process.env.NEXT_PUBLIC_STRAPI_URL || "http://localhost:1337";
@@ -53,8 +60,8 @@ function createPantryFingerprint(items) {
     .digest("hex");
 }
 
-async function getAuthenticatedPantry() {
-  const user = await checkUser();
+async function getAuthenticatedPantry(authenticatedUser = null) {
+  const user = authenticatedUser || (await checkUser());
 
   if (!user) {
     throw new Error("User not authenticated");
@@ -187,34 +194,117 @@ function normalizeTitle(title) {
 
 // Get or generate recipe details
 export async function getOrGenerateRecipe(formData) {
+  const startedAt = performance.now();
+
   try {
+    const authStartedAt = performance.now();
     const user = await checkUser();
+    const authDuration = performance.now() - authStartedAt;
     if (!user) {
       throw new Error("User not authenticated");
     }
 
     const recipeName = formData.get("recipeName");
+    const requestedPantryFingerprint = formData.get("pantryFingerprint");
     if (!recipeName) {
       throw new Error("Recipe name is required");
     }
 
-    // Normalize the title (e.g., "apple cake" → "Apple Cake")
     const normalizedTitle = normalizeTitle(recipeName);
-    console.log("🔍 Searching for recipe:", normalizedTitle);
-
     const isPro = user.subscriptionTier === "pro";
+    const pantryStartedAt = performance.now();
+    const pantry = requestedPantryFingerprint
+      ? await getAuthenticatedPantry(user)
+      : null;
+    const pantryDuration = performance.now() - pantryStartedAt;
+    const pantryFingerprint = pantry?.fingerprint || null;
+    const cacheKey = [
+      String(user.id),
+      normalizedTitle.toLowerCase(),
+      pantryFingerprint || "saved",
+    ].join(":");
 
-    // Step 1: Check if recipe already exists in DB (case-insensitive search)
+    const cached = getRecipeDetailCache(cacheKey);
+    if (cached) {
+      console.info(
+        `[recipe-detail] cache-hit total=${Math.round(
+          performance.now() - startedAt
+        )}ms auth=${Math.round(authDuration)}ms pantry=${Math.round(
+          pantryDuration
+        )}ms`
+      );
+      return { ...cached, isPro };
+    }
+
+    const inFlight = getRecipeDetailInFlight(cacheKey);
+    if (inFlight) {
+      return await inFlight;
+    }
+
+    const request = resolveRecipeDetail(
+      formData,
+      user,
+      pantry,
+      { authDuration, pantryDuration, startedAt }
+    );
+    setRecipeDetailInFlight(cacheKey, request);
+
+    try {
+      const result = await request;
+      if (result?.success) {
+        setRecipeDetailCache(cacheKey, result);
+      }
+      return result;
+    } finally {
+      clearRecipeDetailInFlight(cacheKey, request);
+    }
+  } catch (error) {
+    console.error("❌ Error in getOrGenerateRecipe:", error);
+    throw new Error(error.message || "Failed to load recipe");
+  }
+}
+
+async function resolveRecipeDetail(
+  formData,
+  user,
+  pantry,
+  { authDuration, pantryDuration, startedAt }
+) {
+  try {
+    const recipeName = formData.get("recipeName");
+    const normalizedTitle = normalizeTitle(recipeName);
+    const isPro = user.subscriptionTier === "pro";
+    const pantryFingerprint = pantry?.fingerprint || null;
+    const recipeFilters = [
+      `filters[title][$eqi]=${encodeURIComponent(normalizedTitle)}`,
+    ];
+
+    if (pantryFingerprint) {
+      recipeFilters.push(
+        `filters[author][id][$eq]=${encodeURIComponent(user.id)}`,
+        `filters[pantryFingerprint][$eq]=${encodeURIComponent(
+          pantryFingerprint
+        )}`
+      );
+    }
+
+    const lookupStartedAt = performance.now();
     const searchResponse = await fetch(
-      `${STRAPI_URL}/api/recipes?filters[title][$eqi]=${encodeURIComponent(
-        normalizedTitle
-      )}&populate=*`,
+      `${STRAPI_URL}/api/recipes?${recipeFilters.join("&")}&populate=*`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
         },
         cache: "no-store",
       }
+    );
+    const lookupDuration = performance.now() - lookupStartedAt;
+    console.info(
+      `[recipe-detail] strapi-lookup=${Math.round(
+        lookupDuration
+      )}ms auth=${Math.round(authDuration)}ms pantry=${Math.round(
+        pantryDuration
+      )}ms`
     );
 
     if (searchResponse.ok) {
@@ -240,7 +330,7 @@ export async function getOrGenerateRecipe(formData) {
           isSaved = savedData.data && savedData.data.length > 0;
         }
 
-        return {
+        const result = {
           success: true,
           recipe: searchData.data[0],
           recipeId: searchData.data[0].id,
@@ -249,11 +339,14 @@ export async function getOrGenerateRecipe(formData) {
           isPro,
           message: "Recipe loaded from database",
         };
+        console.info(
+          `[recipe-detail] database-hit total=${Math.round(
+            performance.now() - startedAt
+          )}ms`
+        );
+        return result;
       }
     }
-
-    // Step 2: Recipe doesn't exist, generate with Gemini
-    console.log("🤖 Recipe not found, generating with Gemini...");
 
     const model = genAI.getGenerativeModel({
       model: "gemini-3.5-flash-lite",
@@ -269,7 +362,7 @@ Return ONLY a valid JSON object with this exact structure (no markdown, no expla
   "title": "${normalizedTitle}",
   "description": "Brief 2-3 sentence description of the dish",
   "category": "Must be ONE of these EXACT values: breakfast, lunch, dinner, snack, dessert",
-  "cuisine": "Must be ONE of these EXACT values: italian, chinese, mexican, indian, american, thai, japanese, mediterranean, french, korean, vietnamese, spanish, greek, turkish, moroccan, brazilian, caribbean, middle-eastern, british, german, portuguese, other",
+  "cuisine": "The actual cuisine name as a string, such as Bangladeshi, Indian, Japanese, Korean, Thai, Vietnamese, Lebanese, Persian, Ethiopian, Nigerian, Italian, Mexican, Brazilian, Peruvian, Jamaican, Filipino, or another appropriate regional/traditional cuisine",
   "prepTime": "Time in minutes (number only)",
   "cookTime": "Time in minutes (number only)",
   "servings": "Number of servings (number only)",
@@ -315,9 +408,11 @@ IMPORTANT RULES FOR CATEGORY:
 - Sweet treats (cakes, cookies, ice cream, etc.) → "dessert"
 
 IMPORTANT RULES FOR CUISINE:
-- Use lowercase only
-- Pick the closest match from the allowed values
-- If uncertain, use "other"
+- Choose the cuisine that authentically matches the dish.
+- Regional, traditional, and fusion cuisines are valid.
+- Consider cuisines from South Asia, East Asia, Southeast Asia, the Middle East,
+  Europe, Africa, North America, South America, the Caribbean, and Oceania.
+- If uncertain, use "International" or "Fusion" rather than inventing a classification.
 
 Guidelines:
 - Make ingredients realistic and commonly available
@@ -328,9 +423,15 @@ Guidelines:
 - Keep total instructions under 12 steps
 `;
 
+    const geminiStartedAt = performance.now();
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const text = response.text();
+    console.info(
+      `[recipe-detail] gemini=${Math.round(
+        performance.now() - geminiStartedAt
+      )}ms`
+    );
 
     // Parse JSON response
     let recipeData;
@@ -362,38 +463,20 @@ Guidelines:
       ? recipeData.category.toLowerCase()
       : "dinner";
 
-    // Validate and sanitize cuisine
-    const validCuisines = [
-      "italian",
-      "chinese",
-      "mexican",
-      "indian",
-      "american",
-      "thai",
-      "japanese",
-      "mediterranean",
-      "french",
-      "korean",
-      "vietnamese",
-      "spanish",
-      "greek",
-      "turkish",
-      "moroccan",
-      "brazilian",
-      "caribbean",
-      "middle-eastern",
-      "british",
-      "german",
-      "portuguese",
-      "other",
-    ];
-    const cuisine = validCuisines.includes(recipeData.cuisine?.toLowerCase())
-      ? recipeData.cuisine.toLowerCase()
-      : "other";
+    // Keep the model's free-form cuisine classification intact.
+    const cuisine =
+      typeof recipeData.cuisine === "string" && recipeData.cuisine.trim()
+        ? recipeData.cuisine.trim()
+        : "International";
 
     // Step 3: Fetch image from Unsplash
-    console.log("🖼️ Fetching image from Unsplash...");
+    const imageStartedAt = performance.now();
     const imageUrl = await fetchRecipeImage(normalizedTitle);
+    console.info(
+      `[recipe-detail] image=${Math.round(
+        performance.now() - imageStartedAt
+      )}ms`
+    );
 
     // Step 4: Save generated recipe to database
     const strapiRecipeData = {
@@ -401,6 +484,7 @@ Guidelines:
         title: normalizedTitle,
         description: recipeData.description,
         cuisine,
+        pantryFingerprint,
         category,
         ingredients: recipeData.ingredients,
         instructions: recipeData.instructions,
@@ -416,11 +500,7 @@ Guidelines:
       },
     };
 
-    console.log(
-      "📤 Saving new recipe to database with title:",
-      normalizedTitle
-    );
-
+    const saveStartedAt = performance.now();
     const createRecipeResponse = await fetch(`${STRAPI_URL}/api/recipes`, {
       method: "POST",
       headers: {
@@ -429,14 +509,29 @@ Guidelines:
       },
       body: JSON.stringify(strapiRecipeData),
     });
+    console.info(
+      `[recipe-detail] strapi-save=${Math.round(
+        performance.now() - saveStartedAt
+      )}ms`
+    );
 
     if (!createRecipeResponse.ok) {
       const errorText = await createRecipeResponse.text();
-      console.error("❌ Failed to save recipe:", errorText);
-      throw new Error("Failed to save recipe to database");
+      console.error("❌ Failed to save recipe:", {
+        status: createRecipeResponse.status,
+        response: errorText,
+      });
+      throw new Error(
+        `Failed to save recipe to database (${createRecipeResponse.status})`
+      );
     }
 
     const createdRecipe = await createRecipeResponse.json();
+    if (!createdRecipe?.data?.id) {
+      console.error("❌ Strapi returned an invalid recipe record:", createdRecipe);
+      throw new Error("Recipe save returned an invalid response");
+    }
+
     console.log("✅ Recipe saved to database:", createdRecipe.data.id);
 
     return {
@@ -456,7 +551,7 @@ Guidelines:
       message: "Recipe generated and saved successfully!",
     };
   } catch (error) {
-    console.error("❌ Error in getOrGenerateRecipe:", error);
+    console.error("❌ Error in recipe detail resolution:", error);
     throw new Error(error.message || "Failed to load recipe");
   }
 }
@@ -672,7 +767,7 @@ Return ONLY a valid JSON array. Do not include markdown or explanations.
     "matchPercentage": 85,
     "missingIngredients": ["ingredient1", "ingredient2"],
     "category": "breakfast|lunch|dinner|snack|dessert",
-    "cuisine": "italian|chinese|mexican|indian|other",
+    "cuisine": "The actual cuisine name as a string; use a regional, traditional, or fusion cuisine when appropriate, or International/Fusion when uncertain",
     "prepTime": 20,
     "cookTime": 30,
     "servings": 4
@@ -682,6 +777,10 @@ Return ONLY a valid JSON array. Do not include markdown or explanations.
 Rules:
 - matchPercentage must be between 70 and 100.
 - missingIngredients should contain only necessary missing ingredients.
+- Choose an authentic cuisine from any region of the world, including South Asia,
+  East Asia, Southeast Asia, the Middle East, Europe, Africa, North America,
+  South America, the Caribbean, or Oceania. Use the actual cuisine name as a
+  string, and use International or Fusion when uncertain.
 - Sort recipes by matchPercentage descending.
 - Make recipes realistic and delicious.
 - Use numeric values for prepTime, cookTime, servings and matchPercentage.

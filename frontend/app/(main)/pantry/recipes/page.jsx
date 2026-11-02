@@ -668,6 +668,7 @@ export default function PantryRecipesPage() {
                 <RecipeCard
                   key={recipe.id || recipe.title || index}
                   recipe={recipe}
+                  pantryFingerprint={currentFingerprint}
                   variant="pantry"
                 />
               ))}

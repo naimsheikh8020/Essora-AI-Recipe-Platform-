@@ -572,34 +572,9 @@ export interface ApiRecipeRecipe extends Struct.CollectionTypeSchema {
     createdAt: Schema.Attribute.DateTime;
     createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
       Schema.Attribute.Private;
-    cuisine: Schema.Attribute.Enumeration<
-      [
-        'italian',
-        'chinese',
-        'mexican',
-        'indian',
-        'american',
-        'thai',
-        'japanese',
-        'mediterranean',
-        'french',
-        'korean',
-        'vietnamese',
-        'spanish',
-        'greek',
-        'turkish',
-        'moroccan',
-        'brazilian',
-        'caribbean',
-        'middle - eastern',
-        'british',
-        'german',
-        'portuguese',
-        'other',
-      ]
-    >;
+    cuisine: Schema.Attribute.String;
     description: Schema.Attribute.Blocks;
-    imageUrl: Schema.Attribute.String;
+    imageUrl: Schema.Attribute.Text;
     ingredients: Schema.Attribute.JSON & Schema.Attribute.Required;
     instructions: Schema.Attribute.JSON & Schema.Attribute.Required;
     isPublic: Schema.Attribute.Boolean &
@@ -612,6 +587,7 @@ export interface ApiRecipeRecipe extends Struct.CollectionTypeSchema {
     > &
       Schema.Attribute.Private;
     nutrition: Schema.Attribute.JSON;
+    pantryFingerprint: Schema.Attribute.String;
     prepTime: Schema.Attribute.Integer;
     publishedAt: Schema.Attribute.DateTime;
     saved_recipes: Schema.Attribute.Relation<

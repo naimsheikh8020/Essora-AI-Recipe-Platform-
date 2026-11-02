@@ -23,7 +23,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-export default function RecipeCard({ recipe, variant = "default" }) {
+export default function RecipeCard({
+  recipe,
+  variant = "default",
+  pantryFingerprint,
+}) {
   if (!recipe) return null;
 
   const getRecipeData = () => {
@@ -43,10 +47,18 @@ export default function RecipeCard({ recipe, variant = "default" }) {
 
     // AI-generated pantry recipes
     if (recipe.matchPercentage !== undefined) {
+      const detailParams = new URLSearchParams({
+        cook: recipe.title,
+      });
+
+      if (pantryFingerprint) {
+        detailParams.set("pantryFingerprint", pantryFingerprint);
+      }
+
       return {
         title: recipe.title,
         image: recipe.imageUrl,
-        href: `/recipe?cook=${encodeURIComponent(recipe.title)}`,
+        href: `/recipe?${detailParams.toString()}`,
         description: recipe.description,
         category: recipe.category,
         cuisine: recipe.cuisine,
