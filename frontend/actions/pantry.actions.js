@@ -197,18 +197,20 @@ export async function saveToPantry(formData) {
     const data = await response.json();
     const parseDuration = performance.now() - parseStartedAt;
     const savedCount = data.data?.count || 0;
+    const skippedCount = data.data?.skippedCount || 0;
     const savedItems = data.data?.items || [];
     const ownerIds = savedItems.map((item) => item.owner?.id);
     const expectedOwnerId = Number(user.id);
 
     if (
-      savedCount !== ingredients.length ||
-      savedItems.length !== ingredients.length ||
+      savedCount + skippedCount !== ingredients.length ||
+      savedItems.length !== savedCount ||
       ownerIds.some((ownerId) => ownerId !== expectedOwnerId)
     ) {
       console.error("Pantry bulk save returned an incomplete result:", {
         requested: ingredients.length,
         savedCount,
+        skippedCount,
         returnedItems: savedItems.length,
         ownerIds,
       });
@@ -229,7 +231,10 @@ export async function saveToPantry(formData) {
     return {
       success: true,
       savedItems,
-      message: `Saved ${savedCount} items to your pantry!`,
+      skippedCount,
+      message: skippedCount
+        ? `Saved ${savedCount} new items. Skipped ${skippedCount} already in your pantry.`
+        : `Saved ${savedCount} items to your pantry!`,
     };
   } catch (error) {
     console.error("Error saving to pantry:", error);

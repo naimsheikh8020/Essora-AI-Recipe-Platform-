@@ -7,6 +7,27 @@
 const { createCoreController } = require('@strapi/strapi').factories;
 
 const MAX_BULK_ITEMS = 50;
+const ownerBulkCreateLocks = new Map();
+
+const withOwnerBulkCreateLock = async (ownerId, task) => {
+  const previous = ownerBulkCreateLocks.get(ownerId) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+
+  ownerBulkCreateLocks.set(ownerId, current);
+  await previous;
+
+  try {
+    return await task();
+  } finally {
+    if (ownerBulkCreateLocks.get(ownerId) === current) {
+      ownerBulkCreateLocks.delete(ownerId);
+    }
+    release();
+  }
+};
 
 const getRequestId = (ctx) =>
   ctx.request.headers['x-essora-request-id'] || 'missing';
@@ -103,7 +124,7 @@ module.exports = createCoreController('api::pantry-item.pantry-item', ({ strapi 
       return ctx.badRequest(`A maximum of ${MAX_BULK_ITEMS} ingredients can be saved at once`);
     }
 
-    const normalizedIngredients = [];
+    let normalizedIngredients = [];
     const seenNames = new Set();
 
     for (const ingredient of ingredients) {
@@ -119,7 +140,7 @@ module.exports = createCoreController('api::pantry-item.pantry-item', ({ strapi 
         return ctx.badRequest('Each ingredient must have a valid name and quantity');
       }
 
-      const duplicateKey = name.toLocaleLowerCase();
+      const duplicateKey = name.trim().replace(/\s+/g, ' ').toLocaleLowerCase();
       if (seenNames.has(duplicateKey)) {
         return ctx.badRequest(`Duplicate ingredient: ${name}`);
       }
@@ -141,6 +162,7 @@ module.exports = createCoreController('api::pantry-item.pantry-item', ({ strapi 
 
     const pantryUid = 'api::pantry-item.pantry-item';
     const pantryQuery = strapi.db.query(pantryUid);
+    const requestedIngredientCount = normalizedIngredients.length;
     const createStartedAt = performance.now();
     let createdIds = [];
     let baseCreateDuration = 0;
@@ -163,35 +185,76 @@ module.exports = createCoreController('api::pantry-item.pantry-item', ({ strapi 
       }
     };
 
-    try {
-      const baseCreateStartedAt = performance.now();
-      const created = await pantryQuery.createMany({
-        data: normalizedIngredients,
+    await withOwnerBulkCreateLock(Number(ownerId), async () => {
+      const existingItems = await pantryQuery.findMany({
+        where: { owner: { id: Number(ownerId) } },
+        fields: ['name'],
       });
-      baseCreateDuration = performance.now() - baseCreateStartedAt;
-      createdIds = created.ids;
+      const existingNames = new Set(
+        existingItems.map((item) =>
+          item.name.trim().replace(/\s+/g, ' ').toLocaleLowerCase()
+        )
+      );
 
-      const ownerAttribute = strapi.db.metadata.get(pantryUid).attributes.owner;
-      const { joinTable } = ownerAttribute;
-      const { joinColumn, inverseJoinColumn } = joinTable;
-      const relationRows = createdIds.map((id) => ({
-        [joinColumn.name]: id,
-        [inverseJoinColumn.name]: Number(ownerId),
-      }));
+      normalizedIngredients = normalizedIngredients.filter((ingredient) => {
+        const key = ingredient.name
+          .trim()
+          .replace(/\s+/g, ' ')
+          .toLocaleLowerCase();
 
-      const relationInsertStartedAt = performance.now();
-      await strapi.db.transaction(async ({ trx }) => {
-        await strapi.db.entityManager.insertJoinTableRows(
-          joinTable.name,
-          relationRows,
-          trx
-        );
+        if (existingNames.has(key)) {
+          return false;
+        }
+
+        existingNames.add(key);
+        return true;
       });
-      relationInsertDuration = performance.now() - relationInsertStartedAt;
-    } catch (error) {
-      await cleanupCreatedItems('create');
-      throw error;
-    }
+
+      if (normalizedIngredients.length === 0) {
+        ctx.body = {
+          data: {
+            count: 0,
+            requestedCount: requestedIngredientCount,
+            skippedCount: requestedIngredientCount,
+            ids: [],
+            items: [],
+          },
+        };
+        return;
+      }
+
+      try {
+        const baseCreateStartedAt = performance.now();
+        const created = await pantryQuery.createMany({
+          data: normalizedIngredients,
+        });
+        baseCreateDuration = performance.now() - baseCreateStartedAt;
+        createdIds = created.ids;
+
+        const ownerAttribute = strapi.db.metadata.get(pantryUid).attributes.owner;
+        const { joinTable } = ownerAttribute;
+        const { joinColumn, inverseJoinColumn } = joinTable;
+        const relationRows = createdIds.map((id) => ({
+          [joinColumn.name]: id,
+          [inverseJoinColumn.name]: Number(ownerId),
+        }));
+
+        const relationInsertStartedAt = performance.now();
+        await strapi.db.transaction(async ({ trx }) => {
+          await strapi.db.entityManager.insertJoinTableRows(
+            joinTable.name,
+            relationRows,
+            trx
+          );
+        });
+        relationInsertDuration = performance.now() - relationInsertStartedAt;
+      } catch (error) {
+        await cleanupCreatedItems('create');
+        throw error;
+      }
+    });
+
+    if (ctx.body) return;
 
     const reloadStartedAt = performance.now();
     let savedItems;
@@ -270,6 +333,8 @@ module.exports = createCoreController('api::pantry-item.pantry-item', ({ strapi 
     ctx.body = {
       data: {
         count: savedItems.length,
+        requestedCount: requestedIngredientCount,
+        skippedCount: requestedIngredientCount - savedItems.length,
         ids: createdIds,
         items: savedItems,
       },

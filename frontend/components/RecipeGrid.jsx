@@ -81,7 +81,7 @@ export default function RecipeGrid({
   const heading = isCuisine ? "Cuisine" : "Recipes";
 
   return (
-    <main className="min-h-screen bg-[#FAF9F6] pb-20 pt-16 text-stone-900">
+    <main className="min-h-screen bg-[#FAF9F6] pb-20 pt-12 text-stone-900">
       <div className="mx-auto max-w-[1440px] px-4 sm:px-6 lg:px-10">
         {/* Back navigation */}
         <Link

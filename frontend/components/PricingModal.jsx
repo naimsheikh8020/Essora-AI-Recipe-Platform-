@@ -1,25 +1,63 @@
-"use client"
-import React from 'react'
+// "use client"
+// import React from 'react'
+// import {
+//   Dialog,
+//   DialogContent,
+//   DialogTitle,
+//   DialogTrigger,
+// } from "@/components/ui/dialog"
+// import PricingSection from './PricingSection';
+
+// const PricingModal = ({ subscriptionTier="free", children }) => {
+//   const [isOpen, setIsOpen] = React.useState(false);
+//   const canOpen = subscriptionTier === "free";
+//   return (
+//     <Dialog open={isOpen} onOpenChange={canOpen ? setIsOpen : undefined}>
+//       <DialogTrigger>{children}</DialogTrigger>
+//       <DialogContent className={`p-8 pt-4 sm:max-w-4xl`}>
+//         <DialogTitle />
+//         <PricingSection/>
+//       </DialogContent>
+//     </Dialog>
+//   )
+// }
+
+// export default PricingModal
+
+
+
+"use client";
+
+import React from "react";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog"
-import PricingSection from './PricingSection';
+} from "@/components/ui/dialog";
+import PricingSection from "./PricingSection";
 
-const PricingModal = ({ subscriptionTier="free", children }) => {
+const PricingModal = ({ subscriptionTier = "free", children }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const canOpen = subscriptionTier === "free";
+
   return (
-    <Dialog open={isOpen} onOpenChange={canOpen ? setIsOpen : undefined}>
-      <DialogTrigger>{children}</DialogTrigger>
-      <DialogContent className={`p-8 pt-4 sm:max-w-4xl`}>
+    <Dialog
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (canOpen) setIsOpen(open);
+      }}
+    >
+      <DialogTrigger disabled={!canOpen}>
+        {children}
+      </DialogTrigger>
+
+      <DialogContent className="p-8 pt-4 sm:max-w-4xl">
         <DialogTitle />
-        <PricingSection/>
+        <PricingSection />
       </DialogContent>
     </Dialog>
-  )
-}
+  );
+};
 
-export default PricingModal
+export default PricingModal;

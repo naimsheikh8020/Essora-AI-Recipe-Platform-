@@ -1,0 +1,37 @@
+{
+  "kind": "collectionType",
+  "collectionName": "recipe_image_caches",
+  "info": {
+    "singularName": "recipe-image-cache",
+    "pluralName": "recipe-image-caches",
+    "displayName": "Recipe Image Cache"
+  },
+  "options": {
+    "draftAndPublish": true
+  },
+  "pluginOptions": {},
+  "attributes": {
+    "recipeKey": {
+      "type": "string",
+      "required": true,
+      "unique": true
+    },
+    "recipeTitle": {
+      "type": "string",
+      "required": true
+    },
+    "imageUrl": {
+      "type": "text",
+      "required": true
+    },
+    "photographerName": {
+      "type": "string"
+    },
+    "photographerUrl": {
+      "type": "string"
+    },
+    "unsplashPhotoId": {
+      "type": "string"
+    }
+  }
+}

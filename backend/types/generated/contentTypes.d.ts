@@ -514,6 +514,42 @@ export interface ApiPantryItemPantryItem extends Struct.CollectionTypeSchema {
   };
 }
 
+export interface ApiRecipeImageCacheRecipeImageCache
+  extends Struct.CollectionTypeSchema {
+  collectionName: 'recipe_image_caches';
+  info: {
+    displayName: 'Recipe Image Cache';
+    pluralName: 'recipe-image-caches';
+    singularName: 'recipe-image-cache';
+  };
+  options: {
+    draftAndPublish: true;
+  };
+  attributes: {
+    createdAt: Schema.Attribute.DateTime;
+    createdBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+    imageUrl: Schema.Attribute.Text & Schema.Attribute.Required;
+    locale: Schema.Attribute.String & Schema.Attribute.Private;
+    localizations: Schema.Attribute.Relation<
+      'oneToMany',
+      'api::recipe-image-cache.recipe-image-cache'
+    > &
+      Schema.Attribute.Private;
+    photographerName: Schema.Attribute.String;
+    photographerUrl: Schema.Attribute.String;
+    publishedAt: Schema.Attribute.DateTime;
+    recipeKey: Schema.Attribute.String &
+      Schema.Attribute.Required &
+      Schema.Attribute.Unique;
+    recipeTitle: Schema.Attribute.String & Schema.Attribute.Required;
+    unsplashPhotoId: Schema.Attribute.String;
+    updatedAt: Schema.Attribute.DateTime;
+    updatedBy: Schema.Attribute.Relation<'oneToOne', 'admin::user'> &
+      Schema.Attribute.Private;
+  };
+}
+
 export interface ApiRecipeRecipe extends Struct.CollectionTypeSchema {
   collectionName: 'recipes';
   info: {
@@ -1153,6 +1189,7 @@ declare module '@strapi/strapi' {
       'admin::transfer-token-permission': AdminTransferTokenPermission;
       'admin::user': AdminUser;
       'api::pantry-item.pantry-item': ApiPantryItemPantryItem;
+      'api::recipe-image-cache.recipe-image-cache': ApiRecipeImageCacheRecipeImageCache;
       'api::recipe.recipe': ApiRecipeRecipe;
       'api::saved-recipe.saved-recipe': ApiSavedRecipeSavedRecipe;
       'plugin::content-releases.release': PluginContentReleasesRelease;

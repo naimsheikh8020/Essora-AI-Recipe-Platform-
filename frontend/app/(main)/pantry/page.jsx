@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import {
   Plus,
   Trash2,
@@ -22,17 +23,32 @@ import {
   deletePantryItems,
   updatePantryItem,
 } from "@/actions/pantry.actions";
+import { getPantryIngredients } from "@/actions/recipe.actions";
 import { toast } from "sonner";
 import AddToPantryModal from "@/components/AddToPantryModal";
 import PricingModal from "@/components/PricingModal";
 
+const PANTRY_EVENT = "essora-pantry-updated";
+
+function notifyPantryChanged() {
+  window.dispatchEvent(new Event(PANTRY_EVENT));
+
+  try {
+    localStorage.setItem(PANTRY_EVENT, String(Date.now()));
+  } catch (error) {
+    console.error("Failed to notify pantry change:", error);
+  }
+}
+
 export default function PantryPage() {
+  const router = useRouter();
   const [items, setItems] = useState([]);
   const [editingId, setEditingId] = useState(null);
   const [editValues, setEditValues] = useState({ name: "", quantity: "" });
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState([]);
   const [deletingId, setDeletingId] = useState(null);
+  const [openingRecipes, setOpeningRecipes] = useState(false);
   const refreshRequestRef = useRef(0);
 
   // Fetch pantry items
@@ -72,6 +88,21 @@ export default function PantryPage() {
     return result;
   }, [fetchItems]);
 
+  const handleFindRecipes = async (event) => {
+    event.preventDefault();
+    if (openingRecipes) return;
+
+    setOpeningRecipes(true);
+
+    try {
+      await getPantryIngredients();
+      router.push("/pantry/recipes");
+    } catch (error) {
+      toast.error(error?.message || "Failed to verify your pantry");
+      setOpeningRecipes(false);
+    }
+  };
+
   // Load items on mount.
   useEffect(() => {
     refreshItems();
@@ -88,6 +119,7 @@ export default function PantryPage() {
         currentItems.filter((item) => item.documentId !== itemId)
       );
       setSelectedIds((ids) => ids.filter((id) => id !== itemId));
+      notifyPantryChanged();
       toast.success(result.message);
     }
     setDeletingId(null);
@@ -118,6 +150,7 @@ export default function PantryPage() {
         await refreshItems();
       }
       setSelectedIds([]);
+      notifyPantryChanged();
       toast.success(result.message);
     }
   };
@@ -148,6 +181,7 @@ export default function PantryPage() {
         )
       );
       setEditingId(null);
+      notifyPantryChanged();
       toast.success(result.message);
     }
   };
@@ -161,10 +195,11 @@ export default function PantryPage() {
   // Reload after adding items so the list always matches the database.
   const handleModalSuccess = async () => {
     await refreshItems();
+    notifyPantryChanged();
   };
 
   return (
-    <main className="min-h-screen bg-[#faf9f6] px-4 pb-16 pt-28 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-[#faf9f6] px-4 pb-16 pt-12 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-6xl">
         {/* Page Header */}
         <header className="mb-10">
@@ -244,7 +279,12 @@ export default function PantryPage() {
 
         {/* Find Recipes Banner */}
         {items.length > 0 && (
-          <Link href="/pantry/recipes" className="group mb-10 block">
+          <Link
+            href="/pantry/recipes"
+            onClick={handleFindRecipes}
+            aria-disabled={openingRecipes}
+            className={`group mb-10 block ${openingRecipes ? "pointer-events-none opacity-70" : ""}`}
+          >
             <div className="relative overflow-hidden rounded-2xl bg-stone-900 p-6 text-white shadow-sm transition duration-300 hover:shadow-lg sm:p-8">
               <div className="absolute -right-10 -top-16 h-64 w-64 rounded-full bg-orange-500/20 blur-3xl transition group-hover:bg-orange-500/30" />
 

@@ -1,28 +1,36 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { toast } from "sonner";
 
 const useFetch = (cb) => {
   const [data, setData] = useState(undefined);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const requestIdRef = useRef(0);
 
   const fn = useCallback(
     async (...args) => {
+      const requestId = ++requestIdRef.current;
       setLoading(true);
       setError(null);
 
       try {
         const response = await cb(...args);
-        setData(response);
+        if (requestId === requestIdRef.current) {
+          setData(response);
+        }
         return response;
       } catch (err) {
-        setError(err);
-        toast.error(err?.message || "Something went wrong.");
+        if (requestId === requestIdRef.current) {
+          setError(err);
+          toast.error(err?.message || "Something went wrong.");
+        }
         return null;
       } finally {
-        setLoading(false);
+        if (requestId === requestIdRef.current) {
+          setLoading(false);
+        }
       }
     },
     [cb]
