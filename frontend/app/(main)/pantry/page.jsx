@@ -192,10 +192,26 @@ export default function PantryPage() {
     setEditValues({ name: "", quantity: "" });
   };
 
-  // Reload after adding items so the list always matches the database.
-  const handleModalSuccess = async () => {
-    await refreshItems();
+  // Reflect successful additions immediately, then verify the full server state.
+  const handleModalSuccess = async (addedItems = []) => {
+    if (Array.isArray(addedItems) && addedItems.length > 0) {
+      setItems((currentItems) => {
+        const existingIds = new Set(
+          currentItems.map((item) => item.documentId ?? item.id)
+        );
+        const newItems = addedItems.filter((item) => {
+          const itemId = item?.documentId ?? item?.id;
+          return item && itemId && !existingIds.has(itemId);
+        });
+
+        return newItems.length > 0
+          ? [...currentItems, ...newItems]
+          : currentItems;
+      });
+    }
+
     notifyPantryChanged();
+    await refreshItems();
   };
 
   return (

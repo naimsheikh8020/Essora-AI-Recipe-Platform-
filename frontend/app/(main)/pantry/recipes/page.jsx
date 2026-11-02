@@ -162,7 +162,10 @@ async function fetchPantryRecipesOnce(userId, fingerprint, force = false) {
     : `${userId}:${fingerprint}`;
 
   if (!inFlightRecipesRequests.has(requestKey)) {
-    inFlightRecipesRequests.set(requestKey, getRecipesByPantryIngredients());
+    inFlightRecipesRequests.set(
+      requestKey,
+      getRecipesByPantryIngredients(fingerprint)
+    );
   }
 
   const request = inFlightRecipesRequests.get(requestKey);
@@ -262,8 +265,17 @@ export default function PantryRecipesPage() {
       return;
     }
 
-    fetchSuggestions(currentUserId, currentFingerprint);
-  }, [currentUserId, currentFingerprint, fetchSuggestions]);
+    fetchSuggestions(currentUserId, currentFingerprint).then((response) => {
+      if (response?.stale) {
+        fetchPantry();
+      }
+    });
+  }, [
+    currentUserId,
+    currentFingerprint,
+    fetchSuggestions,
+    fetchPantry,
+  ]);
 
   // ==================================================
   // SAVE GENERATED RECIPES
@@ -331,13 +343,25 @@ export default function PantryRecipesPage() {
   // ==================================================
 
   const handleRefresh = async () => {
-    if (!currentUserId || !currentFingerprint) return;
+    const latestPantry = await fetchPantry();
+
+    if (
+      !latestPantry?.success ||
+      !latestPantry.userId ||
+      !latestPantry.fingerprint
+    ) {
+      return;
+    }
 
     setProgress(0);
     setIsRefreshing(true);
 
     try {
-      await fetchSuggestions(currentUserId, currentFingerprint, true);
+      await fetchSuggestions(
+        latestPantry.userId,
+        latestPantry.fingerprint,
+        true
+      );
     } finally {
       setIsRefreshing(false);
     }
@@ -352,6 +376,12 @@ export default function PantryRecipesPage() {
     .includes("monthly ai recipe limit reached");
 
   const hasOtherError = Boolean(error || pantryError) && !isMonthlyLimitReached;
+
+  const pantryIngredients = Array.isArray(ingredientsUsed)
+    ? ingredientsUsed
+    : typeof ingredientsUsed === "string"
+      ? ingredientsUsed.split(",").map((item) => item.trim()).filter(Boolean)
+      : [];
 
   // ==================================================
   // UI
@@ -373,42 +403,57 @@ export default function PantryRecipesPage() {
         </div>
 
         {/* Ingredients Section */}
-        {ingredientsUsed && (
-          <section className="mb-10 rounded-2xl border border-stone-200 bg-white p-5 shadow-sm sm:p-6">
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        {pantryIngredients.length > 0 && (
+          <section className="mb-10 overflow-hidden rounded-2xl border border-stone-200/80 bg-white shadow-sm">
 
-              <div className="flex items-start gap-3">
+            {/* Header */}
+            <div className="flex flex-col gap-4 border-b border-stone-100 px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+
+              <div className="flex items-center gap-3">
                 <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-orange-50">
                   <Package className="h-5 w-5 text-orange-600" />
                 </div>
 
                 <div>
-                  <h2 className="font-semibold text-stone-900">
-                    Ingredients in your pantry
-                  </h2>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-base font-bold text-stone-900">
+                      Your pantry ingredients
+                    </h2>
+
+                    <span className="rounded-full bg-orange-50 px-2.5 py-1 text-xs font-semibold text-orange-700">
+                      {pantryIngredients.length} items
+                    </span>
+                  </div>
 
                   <p className="mt-1 text-sm text-stone-500">
-                    Your AI chef will use these ingredients to find matching
-                    recipes.
+                    Ingredients used to discover your recipes.
                   </p>
                 </div>
               </div>
 
               <Link
                 href="/pantry"
-                className="inline-flex items-center gap-1 text-sm font-semibold text-orange-600 transition hover:text-orange-700"
+                className="inline-flex w-fit items-center gap-2 rounded-lg border border-stone-200 px-4 py-2.5 text-sm font-semibold text-stone-700 transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-700"
               >
                 Manage pantry
                 <ArrowRight className="h-4 w-4" />
               </Link>
-
             </div>
 
-            <div className="mt-5 border-t border-stone-100 pt-4">
-              <p className="text-sm leading-7 text-stone-600">
-                {ingredientsUsed}
-              </p>
+            {/* Ingredient chips */}
+            <div className="px-5 py-5 sm:px-6">
+              <div className="flex flex-wrap gap-2">
+                {pantryIngredients.map((ingredient, index) => (
+                  <span
+                    key={`${ingredient}-${index}`}
+                    className="inline-flex items-center rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm font-medium text-stone-700 transition hover:border-orange-200 hover:bg-orange-50"
+                  >
+                    {ingredient}
+                  </span>
+                ))}
+              </div>
             </div>
+
           </section>
         )}
 

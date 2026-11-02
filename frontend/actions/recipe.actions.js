@@ -600,11 +600,21 @@ export async function removeRecipeFromCollection(formData) {
 
 // Get recipes based on pantry ingredients
 
-export async function getRecipesByPantryIngredients() {
+export async function getRecipesByPantryIngredients(expectedFingerprint) {
   try {
     // 1. Authenticate user and read the current pantry on the server.
     const pantry = await getAuthenticatedPantry();
     const { user, fingerprint, ingredients } = pantry;
+
+    if (expectedFingerprint && expectedFingerprint !== fingerprint) {
+      return {
+        success: false,
+        stale: true,
+        userId: pantry.userId,
+        fingerprint,
+        message: "Pantry changed. Refreshing recipe suggestions.",
+      };
+    }
 
     if (!ingredients) {
       return {
