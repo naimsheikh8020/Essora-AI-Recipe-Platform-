@@ -612,7 +612,7 @@ export interface ApiSavedRecipeSavedRecipe extends Struct.CollectionTypeSchema {
     singularName: 'saved-recipe';
   };
   options: {
-    draftAndPublish: true;
+    draftAndPublish: false;
   };
   attributes: {
     createdAt: Schema.Attribute.DateTime;

@@ -193,30 +193,99 @@ function normalizeTitle(title) {
 // }
 
 // Get or generate recipe details
-export async function getOrGenerateRecipe(formData) {
-  const startedAt = performance.now();
+function createProgressReporter(onProgress) {
+  let plan = [];
+  let activeStage = "initializing";
+  const completedStages = new Set();
 
-  try {
-    const authStartedAt = performance.now();
-    const user = await checkUser();
-    const authDuration = performance.now() - authStartedAt;
-    if (!user) {
-      throw new Error("User not authenticated");
+  const report = (stage, status, message, nextPlan) => {
+    if (status === "started") {
+      activeStage = stage;
     }
 
+    if (status === "updated" && Array.isArray(nextPlan)) {
+      plan = nextPlan;
+    }
+
+    if (status === "completed" && stage !== "completed") {
+      completedStages.add(stage);
+    }
+
+    if (typeof onProgress !== "function") return;
+
+    const completedCount = completedStages.size;
+    onProgress({
+      type: "progress",
+      stage,
+      status,
+      message,
+      plan,
+      completedStages: Array.from(completedStages),
+      percent:
+        stage === "completed"
+          ? 100
+          : plan.length
+            ? Math.round((completedCount / plan.length) * 100)
+            : 0,
+    });
+  };
+
+  report.fail = (message) => {
+    report(activeStage, "failed", message);
+  };
+
+  return report;
+}
+
+export async function getOrGenerateRecipe(formData) {
+  return runRecipeRequest(formData);
+}
+
+export async function runRecipeRequest(formData, onProgress) {
+  const startedAt = performance.now();
+  const report = createProgressReporter(onProgress);
+
+  try {
     const recipeName = formData.get("recipeName");
     const requestedPantryFingerprint = formData.get("pantryFingerprint");
     if (!recipeName) {
       throw new Error("Recipe name is required");
     }
 
+    report("initializing", "started", "Initializing recipe request.");
+    const initialPlan = [
+      "initializing",
+      "authentication",
+      ...(requestedPantryFingerprint ? ["pantry"] : []),
+      "recipe_lookup",
+      "preparing",
+      "completed",
+    ];
+    report("plan", "updated", null, initialPlan);
+
+    report("initializing", "completed", "Recipe request initialized.");
+    report("authentication", "started", "Checking user authentication.");
+    const authStartedAt = performance.now();
+    const user = await checkUser();
+    const authDuration = performance.now() - authStartedAt;
+    if (!user) {
+      throw new Error("User not authenticated");
+    }
+    report("authentication", "completed", "Authentication verified.");
+
     const normalizedTitle = normalizeTitle(recipeName);
     const isPro = user.subscriptionTier === "pro";
     const pantryStartedAt = performance.now();
+    if (requestedPantryFingerprint) {
+      report("pantry", "started", "Checking pantry ingredients.");
+    }
     const pantry = requestedPantryFingerprint
       ? await getAuthenticatedPantry(user)
       : null;
     const pantryDuration = performance.now() - pantryStartedAt;
+    if (requestedPantryFingerprint) {
+      report("pantry", "completed", "Pantry ingredients checked.");
+    }
     const pantryFingerprint = pantry?.fingerprint || null;
     const cacheKey = [
       String(user.id),
@@ -226,6 +295,11 @@ export async function getOrGenerateRecipe(formData) {
 
     const cached = getRecipeDetailCache(cacheKey);
     if (cached) {
+      report("recipe_lookup", "started", "Checking whether the recipe already exists.");
+      report("recipe_lookup", "completed", "Recipe loaded from cache.");
+      report("preparing", "started", "Preparing recipe details.");
+      report("preparing", "completed", "Recipe details prepared.");
+      report("completed", "completed", "Recipe ready.");
       console.info(
         `[recipe-detail] cache-hit total=${Math.round(
           performance.now() - startedAt
@@ -245,7 +319,7 @@ export async function getOrGenerateRecipe(formData) {
       formData,
       user,
       pantry,
-      { authDuration, pantryDuration, startedAt }
+      { authDuration, pantryDuration, startedAt, report }
     );
     setRecipeDetailInFlight(cacheKey, request);
 
@@ -259,6 +333,7 @@ export async function getOrGenerateRecipe(formData) {
       clearRecipeDetailInFlight(cacheKey, request);
     }
   } catch (error) {
+    report.fail(error.message || "Recipe request failed.");
     console.error("❌ Error in getOrGenerateRecipe:", error);
     throw new Error(error.message || "Failed to load recipe");
   }
@@ -268,7 +343,7 @@ async function resolveRecipeDetail(
   formData,
   user,
   pantry,
-  { authDuration, pantryDuration, startedAt }
+  { authDuration, pantryDuration, startedAt, report }
 ) {
   try {
     const recipeName = formData.get("recipeName");
@@ -288,6 +363,7 @@ async function resolveRecipeDetail(
       );
     }
 
+    report("recipe_lookup", "started", "Checking whether the recipe already exists.");
     const lookupStartedAt = performance.now();
     const searchResponse = await fetch(
       `${STRAPI_URL}/api/recipes?${recipeFilters.join("&")}&populate=*`,
@@ -307,47 +383,70 @@ async function resolveRecipeDetail(
       )}ms`
     );
 
-    if (searchResponse.ok) {
-      const searchData = await searchResponse.json();
-
-      if (searchData.data && searchData.data.length > 0) {
-        console.log("✅ Recipe found in database:", searchData.data[0].id);
-
-        // Check if user has saved this recipe
-        const savedRecipeResponse = await fetch(
-          `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${user.id}&filters[recipe][id][$eq]=${searchData.data[0].id}`,
-          {
-            headers: {
-              Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-            },
-            cache: "no-store",
-          }
-        );
-
-        let isSaved = false;
-        if (savedRecipeResponse.ok) {
-          const savedData = await savedRecipeResponse.json();
-          isSaved = savedData.data && savedData.data.length > 0;
-        }
-
-        const result = {
-          success: true,
-          recipe: searchData.data[0],
-          recipeId: searchData.data[0].id,
-          isSaved: isSaved,
-          fromDatabase: true,
-          isPro,
-          message: "Recipe loaded from database",
-        };
-        console.info(
-          `[recipe-detail] database-hit total=${Math.round(
-            performance.now() - startedAt
-          )}ms`
-        );
-        return result;
-      }
+    if (!searchResponse.ok) {
+      throw new Error(
+        `Failed to check existing recipes (${searchResponse.status})`
+      );
     }
 
+    const searchData = await searchResponse.json();
+
+    if (searchData.data && searchData.data.length > 0) {
+      report("recipe_lookup", "completed", "Recipe found in Strapi.");
+      console.log("✅ Recipe found in database:", searchData.data[0].id);
+
+      // Check if user has saved this recipe
+      const savedRecipeResponse = await fetch(
+        `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${user.id}&filters[recipe][id][$eq]=${searchData.data[0].id}`,
+        {
+          headers: {
+            Authorization: `Bearer ${STRAPI_API_TOKEN}`,
+          },
+          cache: "no-store",
+        }
+      );
+
+      let isSaved = false;
+      if (savedRecipeResponse.ok) {
+        const savedData = await savedRecipeResponse.json();
+        isSaved = savedData.data && savedData.data.length > 0;
+      }
+
+      const result = {
+        success: true,
+        recipe: searchData.data[0],
+        recipeId:
+          searchData.data[0].documentId || searchData.data[0].id,
+        recipeDocumentId: getRecipeDocumentId(searchData.data[0]),
+        isSaved: isSaved,
+        fromDatabase: true,
+        isPro,
+        message: "Recipe loaded from database",
+      };
+      console.info(
+        `[recipe-detail] database-hit total=${Math.round(
+          performance.now() - startedAt
+        )}ms`
+      );
+      report("preparing", "started", "Preparing recipe details.");
+      report("preparing", "completed", "Recipe details prepared.");
+      report("completed", "completed", "Recipe ready.");
+      return result;
+    }
+
+    report("plan", "updated", null, [
+      "initializing",
+      "authentication",
+      ...(pantryFingerprint ? ["pantry"] : []),
+      "recipe_lookup",
+      "generation",
+      "image",
+      "persistence",
+      "preparing",
+      "completed",
+    ]);
+    report("recipe_lookup", "completed", "No existing recipe found.");
+    report("generation", "started", "Generating recipe with Our AI Chef.");
     const model = genAI.getGenerativeModel({
       model: "gemini-3.5-flash-lite",
     });
@@ -432,6 +531,7 @@ Guidelines:
         performance.now() - geminiStartedAt
       )}ms`
     );
+    report("generation", "completed", "Recipe generated with Gemini.");
 
     // Parse JSON response
     let recipeData;
@@ -470,6 +570,7 @@ Guidelines:
         : "International";
 
     // Step 3: Fetch image from Unsplash
+    report("image", "started", "Finding a recipe image.");
     const imageStartedAt = performance.now();
     const imageUrl = await fetchRecipeImage(normalizedTitle);
     console.info(
@@ -477,8 +578,10 @@ Guidelines:
         performance.now() - imageStartedAt
       )}ms`
     );
+    report("image", "completed", "Recipe image selected.");
 
     // Step 4: Save generated recipe to database
+    report("persistence", "started", "Saving recipe to Strapi.");
     const strapiRecipeData = {
       data: {
         title: normalizedTitle,
@@ -533,8 +636,10 @@ Guidelines:
     }
 
     console.log("✅ Recipe saved to database:", createdRecipe.data.id);
+    report("persistence", "completed", "Recipe saved to Strapi.");
+    report("preparing", "started", "Preparing recipe details.");
 
-    return {
+    const recipeResult = {
       success: true,
       recipe: {
         ...recipeData,
@@ -543,13 +648,18 @@ Guidelines:
         cuisine,
         imageUrl: imageUrl || "",
       },
-      recipeId: createdRecipe.data.id,
+      recipeId:
+        createdRecipe.data.documentId || createdRecipe.data.id,
+      recipeDocumentId: getRecipeDocumentId(createdRecipe.data),
       isSaved: false,
       fromDatabase: false,
       recommendationsLimit: isPro ? "unlimited" : 5,
       isPro,
       message: "Recipe generated and saved successfully!",
     };
+    report("preparing", "completed", "Recipe details prepared.");
+    report("completed", "completed", "Recipe ready.");
+    return recipeResult;
   } catch (error) {
     console.error("❌ Error in recipe detail resolution:", error);
     throw new Error(error.message || "Failed to load recipe");
@@ -557,93 +667,362 @@ Guidelines:
 }
 
 // Save recipe to user's collection (bookmark)
-export async function saveRecipeToCollection(formData) {
+
+const savedRecipeLocks = new Map();
+
+function getRelationDocumentId(relation) {
+  return relation?.documentId || relation?.data?.documentId || null;
+}
+
+function getRelationId(relation) {
+  return relation?.id || relation?.data?.id || null;
+}
+
+function getRecipeDocumentId(recipe) {
+  return recipe?.documentId || recipe?.data?.documentId || null;
+}
+
+function actionError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+function getActionFailure(error) {
+  if (error?.code && error?.message) {
+    return {
+      success: false,
+      code: error.code,
+      message: error.message,
+    };
+  }
+
+  if (error instanceof TypeError || error?.name === "FetchError") {
+    return {
+      success: false,
+      code: "NETWORK_ERROR",
+      message: "The recipe service is temporarily unavailable. Please try again.",
+    };
+  }
+
+  return {
+    success: false,
+    code: "INTERNAL_ERROR",
+    message: "Unable to update your recipe collection. Please try again.",
+  };
+}
+
+async function withSavedRecipeLock(key, callback) {
+  const previous = savedRecipeLocks.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => {
+    release = resolve;
+  });
+  savedRecipeLocks.set(key, current);
+  await previous;
+
   try {
-    const user = await checkUser();
+    return await callback();
+  } finally {
+    release();
+    if (savedRecipeLocks.get(key) === current) {
+      savedRecipeLocks.delete(key);
+    }
+  }
+}
+
+
+export async function saveRecipeToCollection(formData) {
+  const totalStart = performance.now();
+  const timings = {};
+
+  // Measure individual operations
+  async function measure(label, callback) {
+    const start = performance.now();
+
+    try {
+      return await callback();
+    } finally {
+      timings[label] = `${Math.round(performance.now() - start)}ms`;
+    }
+  }
+
+  try {
+    // 1. Authenticate user
+    const user = await measure("checkUser", () => checkUser());
+
     if (!user) {
-      throw new Error("User not authenticated");
+      return {
+        success: false,
+        code: "UNAUTHENTICATED",
+        message: "Please sign in to save recipes.",
+      };
     }
 
-    const recipeId = formData.get("recipeId");
-    if (!recipeId) {
-      throw new Error("Recipe ID is required");
+    const recipeId = String(formData.get("recipeId") || "").trim();
+    const requestedDocumentId = String(
+      formData.get("recipeDocumentId") || ""
+    ).trim();
+
+    if (!recipeId && !requestedDocumentId) {
+      return {
+        success: false,
+        code: "INVALID_RECIPE",
+        message: "A valid recipe is required.",
+      };
     }
 
-    // Check if already saved
-    const existingResponse = await fetch(
-      `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${user.id}&filters[recipe][id][$eq]=${recipeId}`,
-      {
-        headers: {
-          Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-        },
-        cache: "no-store",
+    const identifier = requestedDocumentId || recipeId;
+    console.info("[SAVE RECIPE INPUT]", {
+      identifierType: /^\d+$/.test(identifier) ? "numeric-id" : "documentId",
+      hasExplicitDocumentId: Boolean(requestedDocumentId),
+    });
+
+    const headers = {
+      Authorization: `Bearer ${STRAPI_API_TOKEN}`,
+      "Content-Type": "application/json",
+    };
+
+    // Detail responses provide the Strapi documentId. Numeric IDs remain
+    // supported for older callers and use the verified lookup fallback.
+    let recipeDocumentId = /^\d+$/.test(identifier) ? null : identifier;
+    if (!recipeDocumentId) {
+      const recipeResult = await measure("recipeLookup", async () => {
+        const response = await fetch(
+          `${STRAPI_URL}/api/recipes?filters[id][$eq]=${encodeURIComponent(
+            identifier
+          )}&fields[0]=id&fields[1]=documentId&pagination[pageSize]=1`,
+          {
+            headers,
+            cache: "no-store",
+          }
+        );
+
+        if (!response.ok) {
+          throw actionError(
+            response.status === 404 ? "RECIPE_NOT_FOUND" : "STRAPI_ERROR",
+            response.status === 404
+              ? "Recipe was not found."
+              : `Recipe lookup failed: HTTP ${response.status}`
+          );
+        }
+
+        return response.json();
+      });
+
+      recipeDocumentId = recipeResult.data?.[0]?.documentId || null;
+      if (!recipeDocumentId) {
+        throw actionError("RECIPE_NOT_FOUND", "Recipe was not found.");
       }
-    );
+    }
 
-    if (existingResponse.ok) {
-      const existingData = await existingResponse.json();
-      if (existingData.data && existingData.data.length > 0) {
+    return await withSavedRecipeLock(`${user.id}:${recipeDocumentId}`, async () => {
+      const existingResult = await measure("duplicateCheck", async () => {
+        const response = await fetch(
+          `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${encodeURIComponent(
+            user.id
+          )}&filters[recipe][documentId][$eq]=${encodeURIComponent(
+            recipeDocumentId
+          )}&fields[0]=id&fields[1]=documentId&pagination[pageSize]=1&pagination[withCount]=false`,
+          {
+            headers,
+            cache: "no-store",
+          }
+        );
+
+        if (!response.ok) {
+          const errorBody = await response.text();
+
+          console.error("[SAVE RECIPE STRAPI DUPLICATE LOOKUP ERROR]", {
+            status: response.status,
+            statusText: response.statusText,
+            response: errorBody,
+          });
+
+          throw actionError(
+            response.status === 403
+              ? "PERMISSION_DENIED"
+              : "STRAPI_ERROR",
+            response.status === 403
+              ? "You do not have permission to check saved recipes."
+              : `Saved recipe duplicate lookup failed: HTTP ${response.status}`
+          );
+        }
+
+        return response.json();
+      });
+
+      if (existingResult.data?.length > 0) {
         return {
           success: true,
+          data: { alreadySaved: true },
           alreadySaved: true,
           message: "Recipe is already in your collection",
         };
       }
-    }
 
-    // Create saved recipe relation
-    const saveResponse = await fetch(`${STRAPI_URL}/api/saved-recipes`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${STRAPI_API_TOKEN}`,
-      },
-      body: JSON.stringify({
-        data: {
-          user: user.id,
-          recipe: recipeId,
-          savedAt: new Date().toISOString(),
-        },
-      }),
+      const savedRecipe = await measure("createSavedRecipe", async () => {
+        const postStartedAt = performance.now();
+        const response = await fetch(
+          `${STRAPI_URL}/api/saved-recipes?populate[recipe][fields][0]=documentId&populate[user][fields][0]=id`,
+          {
+            method: "POST",
+            headers,
+            body: JSON.stringify({
+              data: {
+                user: user.id,
+                recipe: { connect: [recipeDocumentId] },
+                saveAt: new Date().toISOString(),
+              },
+            }),
+          }
+        );
+        timings.createPost = `${Math.round(
+          performance.now() - postStartedAt
+        )}ms`;
+
+        const responseJsonStartedAt = performance.now();
+        const result = await response.json();
+        timings.createPostResponseJson = `${Math.round(
+          performance.now() - responseJsonStartedAt
+        )}ms`;
+
+        if (!response.ok) {
+          console.error("Strapi save error:", result);
+          throw actionError(
+            response.status === 403 ? "PERMISSION_DENIED" : "STRAPI_ERROR",
+            response.status === 403
+              ? "You do not have permission to save this recipe."
+              : "Recipe could not be saved."
+          );
+        }
+
+        if (!result.data?.id || !result.data?.documentId) {
+          throw actionError(
+            "PERSISTENCE_ERROR",
+            "Recipe could not be saved correctly."
+          );
+        }
+
+        let persistedRecipe = result.data;
+        const hasPersistedRelations =
+          getRelationDocumentId(persistedRecipe.recipe) &&
+          String(getRelationId(persistedRecipe.user)) === String(user.id);
+
+        if (!hasPersistedRelations) {
+          const verificationStartedAt = performance.now();
+          const verificationResponse = await fetch(
+            `${STRAPI_URL}/api/saved-recipes/${encodeURIComponent(
+              result.data.documentId
+            )}?populate[recipe][fields][0]=documentId&populate[user][fields][0]=id`,
+            {
+              headers,
+              cache: "no-store",
+            }
+          );
+          timings.createRelationVerification = `${Math.round(
+            performance.now() - verificationStartedAt
+          )}ms`;
+          const verification = await verificationResponse.json();
+
+          if (
+            !verificationResponse.ok ||
+            !getRelationDocumentId(verification.data?.recipe) ||
+            String(getRelationId(verification.data?.user)) !== String(user.id)
+          ) {
+            throw actionError(
+              "PERSISTENCE_ERROR",
+              "Recipe could not be saved correctly."
+            );
+          }
+
+          persistedRecipe = verification.data;
+        }
+
+        return persistedRecipe;
+      });
+
+      return {
+        success: true,
+        data: { savedRecipe, alreadySaved: false },
+        alreadySaved: false,
+        savedRecipe,
+        message: "Recipe saved successfully!",
+      };
     });
 
-    if (!saveResponse.ok) {
-      const errorText = await saveResponse.text();
-      console.error("❌ Failed to save recipe:", errorText);
-      throw new Error("Failed to save recipe to collection");
-    }
-
-    const savedRecipe = await saveResponse.json();
-    console.log("✅ Recipe saved to user collection:", savedRecipe.data.id);
-
-    return {
-      success: true,
-      alreadySaved: false,
-      savedRecipe: savedRecipe.data,
-      message: "Recipe saved to your collection!",
-    };
   } catch (error) {
-    console.error("❌ Error saving recipe to collection:", error);
-    throw new Error(error.message || "Failed to save recipe");
+    const failure = getActionFailure(error);
+    if (failure.code === "INTERNAL_ERROR") {
+      console.error("[SAVE RECIPE ERROR]", {
+        code: error?.code || "UNKNOWN",
+        message: error?.message || "Unknown error",
+      });
+    }
+    return failure;
+
+  } finally {
+    timings.total = `${Math.round(
+      performance.now() - totalStart
+    )}ms`;
+
+    console.log("[SAVE RECIPE TIMING]", timings);
   }
 }
 
+
+
 // Remove recipe from user's collection (unbookmark)
 export async function removeRecipeFromCollection(formData) {
+  const totalStart = performance.now();
+  const timings = {};
+
+  async function measure(label, callback) {
+    const start = performance.now();
+    try {
+      return await callback();
+    } finally {
+      timings[label] = `${Math.round(performance.now() - start)}ms`;
+    }
+  }
+
   try {
-    const user = await checkUser();
+    const user = await measure("checkUser", () => checkUser());
     if (!user) {
-      throw new Error("User not authenticated");
+      return {
+        success: false,
+        code: "UNAUTHENTICATED",
+        message: "Please sign in to manage saved recipes.",
+      };
     }
 
-    const recipeId = formData.get("recipeId");
-    if (!recipeId) {
-      throw new Error("Recipe ID is required");
+    const recipeId = String(formData.get("recipeId") || "").trim();
+    const requestedDocumentId = String(
+      formData.get("recipeDocumentId") || ""
+    ).trim();
+    const identifier = requestedDocumentId || recipeId;
+
+    if (!identifier) {
+      return {
+        success: false,
+        code: "INVALID_RECIPE",
+        message: "A valid recipe is required.",
+      };
     }
+    console.info("[REMOVE RECIPE INPUT]", {
+      identifierType: /^\d+$/.test(identifier) ? "numeric-id" : "documentId",
+      hasExplicitDocumentId: Boolean(requestedDocumentId),
+    });
 
     // Find saved recipe relation
+    const recipeFilter = /^\d+$/.test(identifier)
+      ? `filters[recipe][id][$eq]=${encodeURIComponent(identifier)}`
+      : `filters[recipe][documentId][$eq]=${encodeURIComponent(identifier)}`;
+    const savedRecipeLookupStartedAt = performance.now();
     const searchResponse = await fetch(
-      `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${user.id}&filters[recipe][id][$eq]=${recipeId}`,
+      `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${encodeURIComponent(
+        user.id
+      )}&${recipeFilter}&fields[0]=id&fields[1]=documentId&pagination[pageSize]=1&pagination[withCount]=false`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
@@ -651,22 +1030,48 @@ export async function removeRecipeFromCollection(formData) {
         cache: "no-store",
       }
     );
+    timings.savedRecipeLookup = `${Math.round(
+      performance.now() - savedRecipeLookupStartedAt
+    )}ms`;
 
     if (!searchResponse.ok) {
-      throw new Error("Failed to find saved recipe");
+      const errorBody = await searchResponse.text();
+
+      console.error("[REMOVE RECIPE STRAPI LOOKUP ERROR]", {
+        status: searchResponse.status,
+        statusText: searchResponse.statusText,
+        response: errorBody,
+      });
+
+      throw actionError(
+        searchResponse.status === 403
+          ? "PERMISSION_DENIED"
+          : "STRAPI_ERROR",
+        searchResponse.status === 403
+          ? "You do not have permission to manage this saved recipe."
+          : `Saved recipe lookup failed: HTTP ${searchResponse.status}`
+      );
     }
 
     const searchData = await searchResponse.json();
 
-    if (!searchData.data || searchData.data.length === 0) {
+    if (!searchData.data?.length) {
       return {
         success: true,
+        data: { removed: false },
         message: "Recipe was not in your collection",
       };
     }
 
     // Delete saved recipe relation
-    const savedRecipeId = searchData.data[0].id;
+    const savedRecipeId = searchData.data[0].documentId;
+    if (!savedRecipeId) {
+      throw actionError(
+        "PERSISTENCE_ERROR",
+        "Saved recipe could not be identified."
+      );
+    }
+    const deleteStartedAt = performance.now();
     const deleteResponse = await fetch(
       `${STRAPI_URL}/api/saved-recipes/${savedRecipeId}`,
       {
@@ -676,20 +1081,38 @@ export async function removeRecipeFromCollection(formData) {
         },
       }
     );
+    timings.deleteSavedRecipe = `${Math.round(
+      performance.now() - deleteStartedAt
+    )}ms`;
 
     if (!deleteResponse.ok) {
-      throw new Error("Failed to remove recipe from collection");
+      throw actionError(
+        deleteResponse.status === 403
+          ? "PERMISSION_DENIED"
+          : "STRAPI_ERROR",
+        deleteResponse.status === 403
+          ? "You do not have permission to remove this recipe."
+          : "Recipe could not be removed."
+      );
     }
-
-    console.log("✅ Recipe removed from user collection");
 
     return {
       success: true,
+      data: { removed: true },
       message: "Recipe removed from your collection",
     };
   } catch (error) {
-    console.error("❌ Error removing recipe from collection:", error);
-    throw new Error(error.message || "Failed to remove recipe");
+    const failure = getActionFailure(error);
+    if (failure.code === "INTERNAL_ERROR") {
+      console.error("[REMOVE RECIPE ERROR]", {
+        code: error?.code || "UNKNOWN",
+        message: error?.message || "Unknown error",
+      });
+    }
+    return failure;
+  } finally {
+    timings.total = `${Math.round(performance.now() - totalStart)}ms`;
+    console.log("[REMOVE RECIPE TIMING]", timings);
   }
 }
 

@@ -13,6 +13,9 @@ module.exports = [
   'strapi::favicon',
   'strapi::public',
   {
+    name: 'global::saved-recipe-request-timing',
+  },
+  {
     name: 'global::pantry-request-timing',
   },
 ];

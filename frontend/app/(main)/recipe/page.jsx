@@ -1,4 +1,4 @@
-/* eslint-disable react-hooks/set-state-in-effect */
+
 "use client";
 
 import { useEffect, useRef, useState, Suspense } from "react";
@@ -17,9 +17,7 @@ import {
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import useFetch from "@/hooks/use-fetch";
 import {
-  getOrGenerateRecipe,
   saveRecipeToCollection,
   removeRecipeFromCollection,
 } from "@/actions/recipe.actions";
@@ -27,126 +25,257 @@ import { toast } from "sonner";
 import Image from "next/image";
 import { PDFDownloadLink } from "@react-pdf/renderer";
 import { RecipePDF } from "@/components/RecipePDF";
-import { ClockLoader } from "react-spinners";
 import ProLockedSection from "@/components/ProLockedSection";
+
+const STAGE_LABELS = {
+  initializing: "Initializing recipe request",
+  authentication: "Checking user authentication",
+  pantry: "Checking pantry ingredients",
+  recipe_lookup: "Checking whether the recipe already exists",
+  generation: "Generating recipe with Our AI Chef",
+  image: "Finding recipe image",
+  persistence: "Saving recipe",
+  preparing: "Preparing recipe details",
+  completed: "Completed",
+};
 
 function RecipeContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+
   const recipeName = searchParams.get("cook");
   const pantryFingerprint = searchParams.get("pantryFingerprint");
 
   const [recipe, setRecipe] = useState(null);
   const [recipeId, setRecipeId] = useState(null);
+  const [recipeDocumentId, setRecipeDocumentId] = useState(null);
+  const [isPro, setIsPro] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
   const [preparedIngredients, setPreparedIngredients] = useState([]);
+  const [loadingRecipe, setLoadingRecipe] = useState(false);
+  const [recipeError, setRecipeError] = useState(null);
+  const [progress, setProgress] = useState({
+    plan: [],
+    completedStages: [],
+    stage: "initializing",
+    status: "started",
+    message: "Initializing recipe request.",
+    percent: 0,
+  });
+
+  const [saving, setSaving] = useState(false);
+  const [removing, setRemoving] = useState(false);
+
   const requestedRecipeKey = useRef(null);
-
-  // Get or generate recipe
-  const {
-    loading: loadingRecipe,
-    data: recipeData,
-    fn: fetchRecipe,
-  } = useFetch(getOrGenerateRecipe);
-
-  // Save to collection
-  const {
-    loading: saving,
-    data: saveData,
-    fn: saveToCollection,
-  } = useFetch(saveRecipeToCollection);
-
-  // Remove from collection
-  const {
-    loading: removing,
-    data: removeData,
-    fn: removeFromCollection,
-  } = useFetch(removeRecipeFromCollection);
+  const toggleInProgress = useRef(false);
+  const requestAbortController = useRef(null);
 
   // Fetch recipe on mount
   useEffect(() => {
     if (!recipeName) return;
 
     const requestKey = `${recipeName}:${pantryFingerprint || "saved"}`;
+
     if (requestedRecipeKey.current === requestKey) return;
 
     requestedRecipeKey.current = requestKey;
+
+    requestAbortController.current?.abort();
+    const abortController = new AbortController();
+    requestAbortController.current = abortController;
+
     setRecipe(null);
     setRecipeId(null);
+    setRecipeDocumentId(null);
+    setIsPro(false);
     setIsSaved(false);
     setPreparedIngredients([]);
+    setRecipeError(null);
+    setLoadingRecipe(true);
+    setProgress({
+      plan: [],
+      completedStages: [],
+      stage: "initializing",
+      status: "started",
+      message: "Initializing recipe request.",
+      percent: 0,
+    });
 
-    const formData = new FormData();
-    formData.append("recipeName", recipeName);
-    if (pantryFingerprint) {
-      formData.append("pantryFingerprint", pantryFingerprint);
-    }
-    fetchRecipe(formData);
-  }, [recipeName, pantryFingerprint, fetchRecipe]);
+    const loadRecipe = async () => {
+      try {
+        const formData = new FormData();
+        formData.append("recipeName", recipeName);
+        if (pantryFingerprint) {
+          formData.append("pantryFingerprint", pantryFingerprint);
+        }
 
-  // Update recipe when data arrives
-  useEffect(() => {
-    if (recipeData?.success) {
-      setRecipe(recipeData.recipe);
-      setRecipeId(recipeData.recipeId);
-      setIsSaved(recipeData.isSaved);
+        const response = await fetch("/api/recipe/progress", {
+          method: "POST",
+          body: formData,
+          signal: abortController.signal,
+        });
 
-      if (recipeData.fromDatabase) {
-        toast.success("Recipe loaded from database");
-      } else {
-        toast.success("New recipe generated and saved!");
+        if (!response.ok || !response.body) {
+          throw new Error("Unable to start recipe generation.");
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        const handleEvent = (payload) => {
+          if (payload.type === "progress") {
+            setProgress(payload);
+            return;
+          }
+          if (payload.type === "error") {
+            throw new Error(payload.message);
+          }
+          if (payload.type === "result" && payload.result?.success) {
+            const result = payload.result;
+            setRecipe(result.recipe);
+            setRecipeId(result.recipe?.id || result.recipeId);
+            setIsPro(Boolean(result.isPro));
+            setRecipeDocumentId(
+              result.recipeDocumentId || result.recipe?.documentId || null
+            );
+            setIsSaved(Boolean(result.isSaved));
+            setProgress((current) => ({
+              ...current,
+              stage: "completed",
+              status: "completed",
+              message: "Recipe ready.",
+              percent: 100,
+            }));
+            toast.success(
+              result.fromDatabase
+                ? "Recipe loaded from database"
+                : "New recipe generated and saved!"
+            );
+          }
+        };
+
+        while (true) {
+          const { value, done } = await reader.read();
+          buffer += decoder.decode(value || new Uint8Array(), {
+            stream: !done,
+          });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+          events.filter(Boolean).forEach((event) => {
+            const data = event
+              .split("\n")
+              .find((line) => line.startsWith("data: "));
+            if (data) handleEvent(JSON.parse(data.slice(6)));
+          });
+          if (done) break;
+        }
+      } catch (error) {
+        if (error.name !== "AbortError" && !abortController.signal.aborted) {
+          setRecipeError(error.message || "Failed to load recipe.");
+        }
+      } finally {
+        if (!abortController.signal.aborted) {
+          setLoadingRecipe(false);
+        }
       }
-    }
-  }, [recipeData]);
+    };
 
-  // Handle save success
-  useEffect(() => {
-    if (saveData?.success) {
-      if (saveData.alreadySaved) {
-        toast.info("Recipe is already in your collection");
-      } else {
-        setIsSaved(true);
-        toast.success("Recipe saved to your collection!");
-      }
-    }
-  }, [saveData]);
+    loadRecipe();
 
-  // Handle remove success
-  useEffect(() => {
-    if (removeData?.success) {
-      setIsSaved(false);
-      toast.success("Recipe removed from collection");
-    }
-  }, [removeData]);
+    return () => abortController.abort();
+  }, [recipeName, pantryFingerprint]);
 
-  // Toggle save/unsave
+  // Toggle save / unsave
   const handleToggleSave = async () => {
-    if (!recipeId) return;
+    if (!recipeId || toggleInProgress.current) return;
+
+    toggleInProgress.current = true;
 
     const formData = new FormData();
-    formData.append("recipeId", recipeId);
+    if (recipeId) {
+      formData.append("recipeId", String(recipeId));
+    }
+    if (recipeDocumentId) {
+      formData.append("recipeDocumentId", String(recipeDocumentId));
+    }
 
-    if (isSaved) {
-      await removeFromCollection(formData);
-    } else {
-      await saveToCollection(formData);
+    try {
+      if (isSaved) {
+        setRemoving(true);
+
+        const result = await removeRecipeFromCollection(formData);
+
+        if (!result?.success) {
+          if (result?.code === "UNAUTHENTICATED") {
+            toast.error(result.message);
+            router.push(
+              `/sign-in?redirect_url=${encodeURIComponent(
+                window.location.pathname + window.location.search
+              )}`
+            );
+            return;
+          }
+          toast.error(result?.message || "Unable to remove recipe.");
+          return;
+        }
+
+        setIsSaved(false);
+        toast.success("Recipe removed from collection");
+      } else {
+        setSaving(true);
+
+        const result = await saveRecipeToCollection(formData);
+
+        if (!result?.success) {
+          if (result?.code === "UNAUTHENTICATED") {
+            toast.error(result.message);
+            router.push(
+              `/sign-in?redirect_url=${encodeURIComponent(
+                window.location.pathname + window.location.search
+              )}`
+            );
+            return;
+          }
+          toast.error(result?.message || "Unable to save recipe.");
+          return;
+        }
+
+        setIsSaved(true);
+
+        if (result.alreadySaved) {
+          toast.info("Recipe is already in your collection");
+        } else {
+          toast.success("Recipe saved to your collection!");
+        }
+      }
+    } catch (error) {
+      console.error("Recipe toggle error:", error);
+      toast.error(error.message || "Something went wrong");
+    } finally {
+      setSaving(false);
+      setRemoving(false);
+      toggleInProgress.current = false;
     }
   };
 
   // No recipe name in URL
   if (!recipeName) {
     return (
-      <div className="min-h-screen bg-stone-50 pt-12 pb-16 px-4">
-        <div className="container mx-auto max-w-4xl text-center py-20">
-          <div className="bg-orange-50 w-20 h-20 border-2 border-orange-200 flex items-center justify-center mx-auto mb-6">
-            <AlertCircle className="w-10 h-10 text-orange-600" />
+      <div className="min-h-screen bg-stone-50 px-4 pb-16 pt-12">
+        <div className="container mx-auto max-w-4xl py-20 text-center">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center border-2 border-orange-200 bg-orange-50">
+            <AlertCircle className="h-10 w-10 text-orange-600" />
           </div>
-          <h2 className="text-2xl font-bold text-stone-900 mb-2">
+
+          <h2 className="mb-2 text-2xl font-bold text-stone-900">
             No recipe specified
           </h2>
-          <p className="text-stone-600 mb-6 font-light">
+
+          <p className="mb-6 font-light text-stone-600">
             Please select a recipe from the dashboard
           </p>
+
           <Link href="/dashboard">
             <Button className="bg-orange-600 hover:bg-orange-700">
               Go to Dashboard
@@ -158,25 +287,62 @@ function RecipeContent() {
   }
 
   // Loading state
-  if (loadingRecipe === null || loadingRecipe) {
+  if (loadingRecipe) {
+    const completedStages = new Set(progress.completedStages);
+
     return (
-      <div className="min-h-screen bg-stone-50 pt-24 pb-16 px-4">
+      <div className="min-h-screen bg-stone-50 px-4 pb-16 pt-24">
         <div className="container mx-auto max-w-4xl">
-          <div className="text-center py-20">
-            <ClockLoader className="mx-auto mb-6" color="#dc6300" />
-            <h2 className="text-3xl font-bold text-stone-900 mb-2 tracking-tight">
+          <div className="py-20 text-center">
+            <Loader2 className="mx-auto mb-6 h-10 w-10 animate-spin text-orange-600" />
+
+            <h2 className="mb-2 text-3xl font-bold tracking-tight text-stone-900">
               Preparing Your Recipe
             </h2>
-            <p className="text-stone-600 font-light">
+
+            <p className="font-light text-stone-600">
               Our AI chef is crafting detailed instructions for{" "}
-              <span className="font-bold text-orange-600">{recipeName}</span>
-              ...
+              <span className="font-bold text-orange-600">
+                {recipeName}
+              </span>
             </p>
-            <div className="mt-8 max-w-md mx-auto">
-              <div className="flex items-center gap-3 text-sm text-stone-500">
-                <div className="flex-1 h-1 bg-stone-200 overflow-hidden relative">
-                  <div className="absolute left-0 top-0 h-full bg-orange-600 animate-slow-fill" />
-                </div>
+
+            <div className="mx-auto mt-8 max-w-lg text-left">
+              <div className="mb-3 flex items-center justify-between text-sm">
+                <span className="font-medium text-stone-700">
+                  {progress.message}
+                </span>
+                <span className="text-stone-500">{progress.percent}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-stone-200">
+                <div
+                  className="h-full rounded-full bg-orange-600 transition-all duration-500"
+                  style={{ width: `${progress.percent}%` }}
+                />
+              </div>
+              <div className="mt-5 space-y-2">
+                {progress.plan.map((stage) => {
+                  const isComplete = completedStages.has(stage);
+                  const isActive =
+                    progress.stage === stage && progress.status === "started";
+                  return (
+                    <div
+                      key={stage}
+                      className="flex items-center gap-2 text-sm text-stone-600"
+                    >
+                      {isComplete ? (
+                        <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                      ) : isActive ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-orange-600" />
+                      ) : (
+                        <div className="h-4 w-4 rounded-full border border-stone-300" />
+                      )}
+                      <span className={isComplete ? "text-stone-400" : ""}>
+                        {STAGE_LABELS[stage] || stage}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -186,28 +352,33 @@ function RecipeContent() {
   }
 
   // Error state
-  if (loadingRecipe === false && !recipe) {
+  if (!loadingRecipe && !recipe) {
     return (
-      <div className="min-h-screen bg-stone-50 pt-24 pb-16 px-4">
-        <div className="container mx-auto max-w-4xl text-center py-20">
-          <div className="bg-red-50 w-20 h-20 border-2 border-red-200 flex items-center justify-center mx-auto mb-6">
-            <AlertCircle className="w-10 h-10 text-red-600" />
+      <div className="min-h-screen bg-stone-50 px-4 pb-16 pt-24">
+        <div className="container mx-auto max-w-4xl py-20 text-center">
+          <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center border-2 border-red-200 bg-red-50">
+            <AlertCircle className="h-10 w-10 text-red-600" />
           </div>
-          <h2 className="text-2xl font-bold text-stone-900 mb-2">
+
+          <h2 className="mb-2 text-2xl font-bold text-stone-900">
             Failed to load recipe
           </h2>
-          <p className="text-stone-600 mb-6 font-light">
-            Something went wrong while loading the recipe. Please try again.
+
+          <p className="mb-6 font-light text-stone-600">
+            {recipeError ||
+              "Something went wrong while loading the recipe. Please try again."}
           </p>
-          <div className="flex gap-3 justify-center">
+
+          <div className="flex justify-center gap-3">
             <Button
               onClick={() => router.back()}
               variant="outline"
               className="border-2 border-stone-900 hover:bg-stone-900 hover:text-white"
             >
-              <ArrowLeft className="w-4 h-4 mr-2" />
+              <ArrowLeft className="mr-2 h-4 w-4" />
               Go Back
             </Button>
+
             <Button
               onClick={() => window.location.reload()}
               className="bg-orange-600 hover:bg-orange-700"
@@ -231,6 +402,7 @@ function RecipeContent() {
       {}
     )
   );
+
   const totalTime =
     (Number.parseInt(recipe.prepTime, 10) || 0) +
     (Number.parseInt(recipe.cookTime, 10) || 0);
@@ -272,10 +444,11 @@ function RecipeContent() {
                     {recipe.cuisine}
                   </Badge>
                 )}
+
                 {recipe.category && (
                   <Badge
                     variant="outline"
-                    className="rounded-full border-stone-200 px-3 py-1 text-xs font-semibold text-stone-600 capitalize"
+                    className="rounded-full border-stone-200 px-3 py-1 text-xs font-semibold capitalize text-stone-600"
                   >
                     {recipe.category}
                   </Badge>
@@ -285,6 +458,7 @@ function RecipeContent() {
               <h1 className="max-w-xl font-serif text-4xl font-semibold leading-tight tracking-tight text-stone-950 sm:text-5xl lg:text-6xl">
                 {recipe.title}
               </h1>
+
               <p className="mt-5 max-w-xl text-base leading-7 text-stone-600 sm:text-lg">
                 {recipe.description}
               </p>
@@ -298,6 +472,7 @@ function RecipeContent() {
                     {recipe.prepTime} min
                   </p>
                 </div>
+
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">
                     Cook
@@ -306,6 +481,7 @@ function RecipeContent() {
                     {recipe.cookTime} min
                   </p>
                 </div>
+
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-stone-400">
                     Serves
@@ -318,12 +494,13 @@ function RecipeContent() {
 
               <div className="mt-7 flex flex-wrap gap-3">
                 <Button
+                  type="button"
                   onClick={handleToggleSave}
-                  disabled={saving || removing}
+                  disabled={saving || removing || !recipeId}
                   className={
                     isSaved
-                      ? "rounded-xl bg-emerald-600 px-5 text-white hover:bg-emerald-700"
-                      : "rounded-xl bg-orange-600 px-5 text-white hover:bg-orange-700"
+                      ? "rounded-xl bg-emerald-600 px-5 text-white hover:bg-emerald-700 disabled:opacity-60"
+                      : "rounded-xl bg-orange-600 px-5 text-white hover:bg-orange-700 disabled:opacity-60"
                   }
                 >
                   {saving || removing ? (
@@ -333,15 +510,23 @@ function RecipeContent() {
                   ) : (
                     <Bookmark className="h-4 w-4" />
                   )}
-                  {saving ? "Saving..." : removing ? "Removing..." : isSaved ? "Saved" : "Save recipe"}
+
+                  {saving
+                    ? "Saving..."
+                    : removing
+                      ? "Removing..."
+                      : isSaved
+                        ? "Saved"
+                        : "Save recipe"}
                 </Button>
+
                 <PDFDownloadLink
                   document={<RecipePDF recipe={recipe} />}
                   fileName={`${recipe.title.replace(/\s+/g, "-").toLowerCase()}.pdf`}
                 >
                   {({ loading }) => (
-                    <Button disabled={loading}>
-                      <Download className="w-4 h-4" />
+                    <Button type="button" disabled={loading}>
+                      <Download className="h-4 w-4" />
                       {loading ? "Preparing PDF..." : "Download PDF"}
                     </Button>
                   )}
@@ -363,6 +548,7 @@ function RecipeContent() {
                     Ingredients
                   </h2>
                 </div>
+
                 <ChefHat className="h-6 w-6 text-orange-600" />
               </div>
 
@@ -372,10 +558,13 @@ function RecipeContent() {
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-stone-400">
                       {category}
                     </h3>
+
                     <div className="divide-y divide-stone-100">
                       {items.map((ingredient, index) => {
                         const ingredientKey = `${category}-${ingredient.item}-${index}`;
-                        const isPrepared = preparedIngredients.includes(ingredientKey);
+                        const isPrepared =
+                          preparedIngredients.includes(ingredientKey);
+
                         return (
                           <label
                             key={ingredientKey}
@@ -387,15 +576,25 @@ function RecipeContent() {
                               onChange={() =>
                                 setPreparedIngredients((current) =>
                                   isPrepared
-                                    ? current.filter((key) => key !== ingredientKey)
+                                    ? current.filter(
+                                        (key) => key !== ingredientKey
+                                      )
                                     : [...current, ingredientKey]
                                 )
                               }
                               className="mt-1 h-4 w-4 rounded border-stone-300 accent-orange-600"
                             />
-                            <span className={`flex-1 text-sm leading-6 ${isPrepared ? "text-stone-400 line-through" : "text-stone-700"}`}>
+
+                            <span
+                              className={`flex-1 text-sm leading-6 ${
+                                isPrepared
+                                  ? "text-stone-400 line-through"
+                                  : "text-stone-700"
+                              }`}
+                            >
                               {ingredient.item}
                             </span>
+
                             <span className="text-right text-sm font-semibold text-stone-900">
                               {ingredient.amount}
                             </span>
@@ -412,14 +611,16 @@ function RecipeContent() {
               <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-stone-200/70">
                 <div className="mb-5 flex items-center justify-between">
                   <h2 className="text-lg font-semibold">Nutrition</h2>
-                  {!recipeData.isPro && (
+
+                  {!isPro && (
                     <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-stone-500">
                       Pro
                     </span>
                   )}
                 </div>
+
                 <ProLockedSection
-                  isPro={recipeData.isPro}
+                  isPro={isPro}
                   lockText="Nutrition info is Pro-only"
                 >
                   <div className="grid grid-cols-2 gap-2">
@@ -429,10 +630,20 @@ function RecipeContent() {
                       ["Carbs", recipe.nutrition.carbs],
                       ["Fat", recipe.nutrition.fat],
                     ].map(([label, value], index) => (
-                      <div key={label} className="rounded-xl bg-stone-50 p-3">
-                        <p className={`text-xl font-semibold ${index === 0 ? "text-orange-600" : "text-stone-900"}`}>
+                      <div
+                        key={label}
+                        className="rounded-xl bg-stone-50 p-3"
+                      >
+                        <p
+                          className={`text-xl font-semibold ${
+                            index === 0
+                              ? "text-orange-600"
+                              : "text-stone-900"
+                          }`}
+                        >
                           {value}
                         </p>
+
                         <p className="mt-1 text-[10px] font-semibold uppercase tracking-wider text-stone-400">
                           {label}
                         </p>
@@ -450,9 +661,11 @@ function RecipeContent() {
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-orange-600">
                   The method
                 </p>
+
                 <h2 className="mt-1 text-3xl font-semibold tracking-tight">
                   Cooking instructions
                 </h2>
+
                 <p className="mt-2 text-sm text-stone-500">
                   {totalTime} minutes from start to finish.
                 </p>
@@ -460,25 +673,34 @@ function RecipeContent() {
 
               <div className="space-y-8">
                 {recipe.instructions.map((step, index) => (
-                  <div key={step.step || index} className="relative flex gap-5">
+                  <div
+                    key={step.step || index}
+                    className="relative flex gap-5"
+                  >
                     <div className="relative flex w-9 shrink-0 justify-center">
                       <span className="z-10 flex h-9 w-9 items-center justify-center rounded-full bg-orange-600 text-sm font-bold text-white">
                         {step.step || index + 1}
                       </span>
+
                       {index !== recipe.instructions.length - 1 && (
                         <span className="absolute top-9 h-[calc(100%+2rem)] w-px bg-orange-100" />
                       )}
                     </div>
+
                     <div className="min-w-0 flex-1 pb-1">
                       <h3 className="text-lg font-semibold text-stone-900">
                         {step.title}
                       </h3>
+
                       <p className="mt-2 text-sm leading-7 text-stone-600">
                         {step.instruction}
                       </p>
+
                       {step.tip && (
                         <div className="mt-4 rounded-xl bg-orange-50/70 px-4 py-3 text-sm leading-6 text-orange-950">
-                          <span className="mr-1 font-semibold text-orange-700">Tip</span>
+                          <span className="mr-1 font-semibold text-orange-700">
+                            Tip
+                          </span>
                           {step.tip}
                         </div>
                       )}
@@ -491,8 +713,10 @@ function RecipeContent() {
             <div className="rounded-2xl bg-stone-900 p-6 text-white sm:p-8">
               <div className="flex items-start gap-4">
                 <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-orange-400" />
+
                 <div>
                   <h3 className="font-semibold">Ready to serve</h3>
+
                   <p className="mt-1 text-sm leading-6 text-stone-300">
                     Plate your masterpiece and enjoy your {recipe.title}.
                   </p>
@@ -504,21 +728,29 @@ function RecipeContent() {
               <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-stone-200/70 sm:p-8">
                 <div className="mb-5 flex items-center gap-3">
                   <Lightbulb className="h-5 w-5 text-orange-600" />
-                  <h2 className="text-2xl font-semibold">Chef&apos;s tips</h2>
-                  {!recipeData.isPro && (
+
+                  <h2 className="text-2xl font-semibold">
+                    Chef&apos;s tips
+                  </h2>
+
+                  {!isPro && (
                     <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-stone-500">
                       Pro
                     </span>
                   )}
                 </div>
+
                 <ProLockedSection
-                  isPro={recipeData.isPro}
+                  isPro={isPro}
                   lockText="Chef tips are Pro-only"
                   ctaText="Unlock Pro Tips →"
                 >
                   <ul className="space-y-3">
                     {recipe.tips.map((tip, index) => (
-                      <li key={index} className="flex gap-3 text-sm leading-7 text-stone-600">
+                      <li
+                        key={index}
+                        className="flex gap-3 text-sm leading-7 text-stone-600"
+                      >
                         <span className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-orange-600" />
                         <span>{tip}</span>
                       </li>
@@ -531,36 +763,50 @@ function RecipeContent() {
             {recipe.substitutions?.length > 0 && (
               <section className="rounded-2xl bg-white p-6 shadow-sm ring-1 ring-stone-200/70 sm:p-8">
                 <div className="mb-2 flex items-center gap-3">
-                  <h2 className="text-2xl font-semibold">Substitutions</h2>
-                  {!recipeData.isPro && (
+                  <h2 className="text-2xl font-semibold">
+                    Substitutions
+                  </h2>
+
+                  {!isPro && (
                     <span className="rounded-full bg-stone-100 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-stone-500">
                       Pro
                     </span>
                   )}
                 </div>
+
                 <p className="mb-6 text-sm leading-6 text-stone-500">
                   Flexible alternatives when you&apos;re missing an ingredient.
                 </p>
+
                 <ProLockedSection
-                  isPro={recipeData.isPro}
+                  isPro={isPro}
                   lockText="Substitutions are Pro-only"
                 >
                   <div className="divide-y divide-stone-100">
                     {recipe.substitutions.map((sub, index) => (
-                      <div key={index} className="py-4 first:pt-0 last:pb-0">
+                      <div
+                        key={index}
+                        className="py-4 first:pt-0 last:pb-0"
+                      >
                         <p className="text-sm font-semibold text-stone-900">
-                          Instead of <span className="text-orange-600">{sub.original}</span>
+                          Instead of{" "}
+                          <span className="text-orange-600">
+                            {sub.original}
+                          </span>
                         </p>
+
                         <div className="mt-2 flex flex-wrap gap-2">
-                          {sub.alternatives.map((alternative, alternativeIndex) => (
-                            <Badge
-                              key={alternativeIndex}
-                              variant="outline"
-                              className="rounded-full border-stone-200 px-3 py-1 text-xs font-medium text-stone-600"
-                            >
-                              {alternative}
-                            </Badge>
-                          ))}
+                          {sub.alternatives.map(
+                            (alternative, alternativeIndex) => (
+                              <Badge
+                                key={alternativeIndex}
+                                variant="outline"
+                                className="rounded-full border-stone-200 px-3 py-1 text-xs font-medium text-stone-600"
+                              >
+                                {alternative}
+                              </Badge>
+                            )
+                          )}
                         </div>
                       </div>
                     ))}
@@ -579,9 +825,9 @@ export default function RecipePage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-stone-50 pt-24 pb-16 px-4">
-          <div className="container mx-auto max-w-4xl text-center py-20">
-            <Loader2 className="w-16 h-16 text-orange-600 animate-spin mx-auto mb-6" />
+        <div className="min-h-screen bg-stone-50 px-4 pb-16 pt-24">
+          <div className="container mx-auto max-w-4xl py-20 text-center">
+            <Loader2 className="mx-auto mb-6 h-16 w-16 animate-spin text-orange-600" />
             <p className="text-stone-600">Loading recipe...</p>
           </div>
         </div>
