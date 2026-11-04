@@ -4,7 +4,7 @@ module.exports = ({ strapi } = {}) => {
   return async (ctx, next) => {
     if (
       process.env.NODE_ENV !== 'development' ||
-      ctx.path !== '/api/saved-recipes'
+      !ctx.path.startsWith('/api/saved-recipes')
     ) {
       return next();
     }

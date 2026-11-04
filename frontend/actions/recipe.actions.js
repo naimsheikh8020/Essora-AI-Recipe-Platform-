@@ -712,14 +712,6 @@ Guidelines:
 
 const savedRecipeLocks = new Map();
 
-function getRelationDocumentId(relation) {
-  return relation?.documentId || relation?.data?.documentId || null;
-}
-
-function getRelationId(relation) {
-  return relation?.id || relation?.data?.id || null;
-}
-
 function getRecipeDocumentId(recipe) {
   return recipe?.documentId || recipe?.data?.documentId || null;
 }
@@ -859,136 +851,48 @@ export async function saveRecipeToCollection(formData) {
     }
 
     return await withSavedRecipeLock(`${user.id}:${recipeDocumentId}`, async () => {
-      const existingResult = await measure("duplicateCheck", async () => {
-        const response = await fetch(
-          `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${encodeURIComponent(
-            user.id
-          )}&filters[recipe][documentId][$eq]=${encodeURIComponent(
-            recipeDocumentId
-          )}&fields[0]=id&fields[1]=documentId&pagination[pageSize]=1&pagination[withCount]=false`,
-          {
-            headers,
-            cache: "no-store",
-          }
+      const saveResponse = await measure("saveRequest", () =>
+        fetch(`${STRAPI_URL}/api/saved-recipes/save`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            data: {
+              userId: user.id,
+              recipeDocumentId,
+            },
+          }),
+        })
+      );
+
+      const result = await saveResponse.json();
+      if (!saveResponse.ok) {
+        throw actionError(
+          saveResponse.status === 403 ? "PERMISSION_DENIED" : "STRAPI_ERROR",
+          result?.error?.message || "Recipe could not be saved."
         );
+      }
 
-        if (!response.ok) {
-          const errorBody = await response.text();
-
-          console.error("[SAVE RECIPE STRAPI DUPLICATE LOOKUP ERROR]", {
-            status: response.status,
-            statusText: response.statusText,
-            response: errorBody,
-          });
-
-          throw actionError(
-            response.status === 403
-              ? "PERMISSION_DENIED"
-              : "STRAPI_ERROR",
-            response.status === 403
-              ? "You do not have permission to check saved recipes."
-              : `Saved recipe duplicate lookup failed: HTTP ${response.status}`
-          );
-        }
-
-        return response.json();
-      });
-
-      if (existingResult.data?.length > 0) {
+      if (result.data?.alreadySaved) {
         return {
           success: true,
-          data: { alreadySaved: true },
+          data: result.data,
           alreadySaved: true,
           message: "Recipe is already in your collection",
         };
       }
 
-      const savedRecipe = await measure("createSavedRecipe", async () => {
-        const postStartedAt = performance.now();
-        const response = await fetch(
-          `${STRAPI_URL}/api/saved-recipes?populate[recipe][fields][0]=documentId&populate[user][fields][0]=id`,
-          {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              data: {
-                user: user.id,
-                recipe: { connect: [recipeDocumentId] },
-                saveAt: new Date().toISOString(),
-              },
-            }),
-          }
+      if (!result.data?.id || !result.data?.documentId) {
+        throw actionError(
+          "PERSISTENCE_ERROR",
+          "Recipe could not be saved correctly."
         );
-        timings.createPost = `${Math.round(
-          performance.now() - postStartedAt
-        )}ms`;
-
-        const responseJsonStartedAt = performance.now();
-        const result = await response.json();
-        timings.createPostResponseJson = `${Math.round(
-          performance.now() - responseJsonStartedAt
-        )}ms`;
-
-        if (!response.ok) {
-          console.error("Strapi save error:", result);
-          throw actionError(
-            response.status === 403 ? "PERMISSION_DENIED" : "STRAPI_ERROR",
-            response.status === 403
-              ? "You do not have permission to save this recipe."
-              : "Recipe could not be saved."
-          );
-        }
-
-        if (!result.data?.id || !result.data?.documentId) {
-          throw actionError(
-            "PERSISTENCE_ERROR",
-            "Recipe could not be saved correctly."
-          );
-        }
-
-        let persistedRecipe = result.data;
-        const hasPersistedRelations =
-          getRelationDocumentId(persistedRecipe.recipe) &&
-          String(getRelationId(persistedRecipe.user)) === String(user.id);
-
-        if (!hasPersistedRelations) {
-          const verificationStartedAt = performance.now();
-          const verificationResponse = await fetch(
-            `${STRAPI_URL}/api/saved-recipes/${encodeURIComponent(
-              result.data.documentId
-            )}?populate[recipe][fields][0]=documentId&populate[user][fields][0]=id`,
-            {
-              headers,
-              cache: "no-store",
-            }
-          );
-          timings.createRelationVerification = `${Math.round(
-            performance.now() - verificationStartedAt
-          )}ms`;
-          const verification = await verificationResponse.json();
-
-          if (
-            !verificationResponse.ok ||
-            !getRelationDocumentId(verification.data?.recipe) ||
-            String(getRelationId(verification.data?.user)) !== String(user.id)
-          ) {
-            throw actionError(
-              "PERSISTENCE_ERROR",
-              "Recipe could not be saved correctly."
-            );
-          }
-
-          persistedRecipe = verification.data;
-        }
-
-        return persistedRecipe;
-      });
+      }
 
       return {
         success: true,
-        data: { savedRecipe, alreadySaved: false },
+        data: { savedRecipe: result.data, alreadySaved: false },
         alreadySaved: false,
-        savedRecipe,
+        savedRecipe: result.data,
         message: "Recipe saved successfully!",
       };
     });
@@ -1056,10 +960,40 @@ export async function removeRecipeFromCollection(formData) {
       hasExplicitDocumentId: Boolean(requestedDocumentId),
     });
 
-    // Find saved recipe relation
-    const recipeFilter = /^\d+$/.test(identifier)
-      ? `filters[recipe][id][$eq]=${encodeURIComponent(identifier)}`
-      : `filters[recipe][documentId][$eq]=${encodeURIComponent(identifier)}`;
+    const recipeDocumentId = /^\d+$/.test(identifier) ? null : identifier;
+    if (!recipeDocumentId) {
+      throw actionError(
+        "INVALID_RECIPE",
+        "A recipe documentId is required to remove this recipe."
+      );
+    }
+    const removeResponse = await measure("removeRequest", () =>
+      fetch(`${STRAPI_URL}/api/saved-recipes/remove`, {
+        method: "POST",
+        headers: {
+          Authorization: `******`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          data: { userId: user.id, recipeDocumentId },
+        }),
+      })
+    );
+    const removeResult = await removeResponse.json();
+    if (!removeResponse.ok) {
+      throw actionError(
+        removeResponse.status === 403 ? "PERMISSION_DENIED" : "STRAPI_ERROR",
+        removeResult?.error?.message || "Recipe could not be removed."
+      );
+    }
+    return {
+      success: true,
+      data: removeResult.data,
+      message: removeResult.data?.removed
+        ? "Recipe removed from your collection"
+        : "Recipe was not in your collection",
+    };
+    /*
     const savedRecipeLookupStartedAt = performance.now();
     const searchResponse = await fetch(
       `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${encodeURIComponent(
@@ -1143,6 +1077,7 @@ export async function removeRecipeFromCollection(formData) {
       data: { removed: true },
       message: "Recipe removed from your collection",
     };
+    */
   } catch (error) {
     const failure = getActionFailure(error);
     if (failure.code === "INTERNAL_ERROR") {
