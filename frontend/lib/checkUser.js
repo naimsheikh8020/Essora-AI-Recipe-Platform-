@@ -8,6 +8,13 @@ const VERIFIED_USER_TTL = 30_000;
 const verifiedUsers = new Map();
 const userLookupsInFlight = new Map();
 
+function createStrapiError(message, cause) {
+  const error = new Error(message);
+  error.code = "STRAPI_UNAVAILABLE";
+  error.cause = cause;
+  return error;
+}
+
 const fetchStrapiWithRetryUncoalesced = async (url, options, operation) => {
   let lastError;
 
@@ -38,7 +45,9 @@ const fetchStrapiWithRetry = (url, options, operation) => {
   }
 
   const existing = userLookupsInFlight.get(url);
-  if (existing) return existing;
+  if (existing) {
+    return existing.then((response) => response.clone());
+  }
 
   const request = fetchStrapiWithRetryUncoalesced(url, options, operation);
   userLookupsInFlight.set(url, request);
@@ -51,7 +60,7 @@ const fetchStrapiWithRetry = (url, options, operation) => {
       userLookupsInFlight.delete(url);
     }
   });
-  return request;
+  return request.then((response) => response.clone());
 };
 
 export const checkUser = async (requestId = "unattributed") => {
@@ -66,8 +75,7 @@ export const checkUser = async (requestId = "unattributed") => {
   }
 
   if (!STRAPI_API_TOKEN) {
-    console.log("STRAPI_API_TOKEN is not found");
-    return null;
+    throw createStrapiError("Recipe service is not configured.");
   }
 
   const subscriptionTier = has({plan: "pro"}) ? "pro" : "free";
@@ -88,7 +96,9 @@ export const checkUser = async (requestId = "unattributed") => {
         );
 
         if (!updateResponse.ok) {
-          return null;
+          throw createStrapiError(
+            "Recipe service could not refresh your account."
+          );
         }
 
         cached.user = { ...cached.user, subscriptionTier };
@@ -116,16 +126,23 @@ export const checkUser = async (requestId = "unattributed") => {
       const errorText = await existingUserResponse.text();
 
       console.error("Strapi error response:", errorText);
-      return null;
+      throw createStrapiError(
+        `Recipe service returned HTTP ${existingUserResponse.status}.`
+      );
     }
 
     const lookupDuration = performance.now() - lookupStartedAt;
     const parseStartedAt = performance.now();
-    const existingUserData = await existingUserResponse.json();
+    const existingUserPayload = await existingUserResponse.json();
     const parseDuration = performance.now() - parseStartedAt;
+    const existingUsers = Array.isArray(existingUserPayload)
+      ? existingUserPayload
+      : existingUserPayload?.data || [];
 
-    if (existingUserData.length > 0) {
-      const existingUser = existingUserData[0];
+    if (existingUsers.length > 0) {
+      const existingUser = existingUsers[0]?.attributes
+        ? { id: existingUsers[0].id, ...existingUsers[0].attributes }
+        : existingUsers[0];
 
       // Update subscription tier if changed
       if (existingUser.subscriptionTier !== subscriptionTier) {
@@ -218,10 +235,18 @@ export const checkUser = async (requestId = "unattributed") => {
 
     return newUser;
   } catch (error) {
+    if (error?.code === "STRAPI_UNAVAILABLE") {
+      throw error;
+    }
+
     console.error(
       `[checkUser] Strapi request failed for ${STRAPI_URL}; ` +
-        "authentication state was not changed."
+        "authentication state was not changed.",
+      error
     );
-    return null;
+    throw createStrapiError(
+      "Recipe service is temporarily unavailable. Please try again.",
+      error
+    );
   }
 };

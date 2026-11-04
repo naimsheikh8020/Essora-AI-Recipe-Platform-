@@ -40,6 +40,71 @@ const STAGE_LABELS = {
   completed: "Completed",
 };
 
+const CLIENT_RECIPE_CACHE_PREFIX = "essora:recipe:";
+const CLIENT_RECIPE_CACHE_TTL = 15 * 60 * 1000;
+const CLIENT_RECIPE_CACHE_LIMIT = 12;
+
+function getClientRecipeCacheKey(recipeName, pantryFingerprint) {
+  return `${CLIENT_RECIPE_CACHE_PREFIX}${[
+    recipeName.trim().toLowerCase(),
+    pantryFingerprint || "saved",
+  ].join(":")}`;
+}
+
+function readClientRecipeCache(key) {
+  try {
+    const raw = sessionStorage.getItem(key);
+    if (!raw) return null;
+
+    const entry = JSON.parse(raw);
+    if (
+      !entry?.savedAt ||
+      Date.now() - entry.savedAt > CLIENT_RECIPE_CACHE_TTL ||
+      !entry.result?.recipe
+    ) {
+      sessionStorage.removeItem(key);
+      return null;
+    }
+
+    return entry.result;
+  } catch {
+    return null;
+  }
+}
+
+function writeClientRecipeCache(key, result) {
+  try {
+    sessionStorage.setItem(
+      key,
+      JSON.stringify({ savedAt: Date.now(), result })
+    );
+
+    const keys = Object.keys(sessionStorage).filter((item) =>
+      item.startsWith(CLIENT_RECIPE_CACHE_PREFIX)
+    );
+    if (keys.length > CLIENT_RECIPE_CACHE_LIMIT) {
+      keys
+        .sort(
+          (left, right) =>
+            Number(JSON.parse(sessionStorage.getItem(left) || "{}").savedAt) -
+            Number(JSON.parse(sessionStorage.getItem(right) || "{}").savedAt)
+        )
+        .slice(0, keys.length - CLIENT_RECIPE_CACHE_LIMIT)
+        .forEach((item) => sessionStorage.removeItem(item));
+    }
+  } catch {
+    // Browser storage can be disabled or full; the server request still works.
+  }
+}
+
+function updateClientRecipeCacheSavedState(key, isSaved) {
+  if (!key) return;
+  const result = readClientRecipeCache(key);
+  if (result) {
+    writeClientRecipeCache(key, { ...result, isSaved });
+  }
+}
+
 function RecipeContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -71,6 +136,7 @@ function RecipeContent() {
   const requestedRecipeKey = useRef(null);
   const toggleInProgress = useRef(false);
   const requestAbortController = useRef(null);
+  const clientRecipeCacheKey = useRef(null);
 
   // Fetch recipe on mount
   useEffect(() => {
@@ -79,8 +145,13 @@ function RecipeContent() {
     const requestKey = `${savedRecipeDocumentId || recipeName}:${
       pantryFingerprint || "saved"
     }`;
+    const cacheKey =
+      !savedRecipeDocumentId && recipeName
+        ? getClientRecipeCacheKey(recipeName, pantryFingerprint)
+        : null;
 
     requestedRecipeKey.current = requestKey;
+    clientRecipeCacheKey.current = cacheKey;
 
     requestAbortController.current?.abort();
     const abortController = new AbortController();
@@ -93,6 +164,8 @@ function RecipeContent() {
     setIsSaved(false);
     setPreparedIngredients([]);
     setRecipeError(null);
+    setSaving(false);
+    setRemoving(false);
     setLoadingRecipe(true);
     setProgress({
       plan: [],
@@ -102,6 +175,34 @@ function RecipeContent() {
       message: "Initializing recipe request.",
       percent: 0,
     });
+
+    const cachedResult = cacheKey ? readClientRecipeCache(cacheKey) : null;
+    if (cachedResult) {
+      setRecipe(cachedResult.recipe);
+      setRecipeId(cachedResult.recipe?.id || cachedResult.recipeId);
+      setRecipeDocumentId(
+        cachedResult.recipeDocumentId ||
+          cachedResult.recipe?.documentId ||
+          null
+      );
+      setIsPro(Boolean(cachedResult.isPro));
+      setIsSaved(Boolean(cachedResult.isSaved));
+      setProgress({
+        plan: ["recipe_lookup", "preparing", "completed"],
+        completedStages: ["recipe_lookup", "preparing", "completed"],
+        stage: "completed",
+        status: "completed",
+        message: "Recipe loaded from your recent recipes.",
+        percent: 100,
+      });
+      setLoadingRecipe(false);
+      return () => {
+        abortController.abort();
+        if (requestedRecipeKey.current === requestKey) {
+          requestedRecipeKey.current = null;
+        }
+      };
+    }
 
     const loadRecipe = async () => {
       try {
@@ -147,6 +248,9 @@ function RecipeContent() {
               result.recipeDocumentId || result.recipe?.documentId || null
             );
             setIsSaved(Boolean(result.isSaved));
+            if (cacheKey) {
+              writeClientRecipeCache(cacheKey, result);
+            }
             setProgress((current) => ({
               ...current,
               stage: "completed",
@@ -233,6 +337,7 @@ function RecipeContent() {
         }
 
         setIsSaved(false);
+        updateClientRecipeCacheSavedState(clientRecipeCacheKey.current, false);
         toast.success("Recipe removed from collection");
       } else {
         setSaving(true);
@@ -254,6 +359,7 @@ function RecipeContent() {
         }
 
         setIsSaved(true);
+        updateClientRecipeCacheSavedState(clientRecipeCacheKey.current, true);
 
         if (result.alreadySaved) {
           toast.info("Recipe is already in your collection");

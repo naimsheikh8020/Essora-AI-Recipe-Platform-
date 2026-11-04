@@ -390,6 +390,11 @@ export async function runRecipeRequest(formData, onProgress) {
   } catch (error) {
     report.fail(error.message || "Recipe request failed.");
     console.error("❌ Error in getOrGenerateRecipe:", error);
+    if (error?.code === "STRAPI_UNAVAILABLE") {
+      throw new Error(
+        "Your account service is temporarily unavailable. Please try again in a moment."
+      );
+    }
     throw new Error(error.message || "Failed to load recipe");
   }
 }
