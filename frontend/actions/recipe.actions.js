@@ -291,8 +291,11 @@ export async function runRecipeRequest(formData, onProgress) {
 
   try {
     const recipeName = formData.get("recipeName");
+    const requestedDocumentId = String(
+      formData.get("recipeDocumentId") || ""
+    ).trim();
     const requestedPantryFingerprint = formData.get("pantryFingerprint");
-    if (!recipeName) {
+    if (!recipeName && !requestedDocumentId) {
       throw new Error("Recipe name is required");
     }
 
@@ -316,6 +319,14 @@ export async function runRecipeRequest(formData, onProgress) {
       throw new Error("User not authenticated");
     }
     report("authentication", "completed", "Authentication verified.");
+
+    if (requestedDocumentId) {
+      return resolveSavedRecipeDetail(
+        requestedDocumentId,
+        user,
+        { startedAt, report }
+      );
+    }
 
     const normalizedTitle = normalizeTitle(recipeName);
     const isPro = user.subscriptionTier === "pro";
@@ -381,6 +392,77 @@ export async function runRecipeRequest(formData, onProgress) {
     console.error("❌ Error in getOrGenerateRecipe:", error);
     throw new Error(error.message || "Failed to load recipe");
   }
+}
+
+async function resolveSavedRecipeDetail(documentId, user, { startedAt, report }) {
+  report("plan", "updated", null, [
+    "initializing",
+    "authentication",
+    "recipe_lookup",
+    "preparing",
+    "completed",
+  ]);
+  report("recipe_lookup", "started", "Opening your saved recipe.");
+
+  const savedResponse = await fetch(
+    `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${encodeURIComponent(
+      user.id
+    )}&filters[recipe][documentId][$eq]=${encodeURIComponent(
+      documentId
+    )}&fields[0]=documentId&pagination[pageSize]=1&pagination[withCount]=false`,
+    {
+      headers: { Authorization: `Bearer ${STRAPI_API_TOKEN}` },
+      cache: "no-store",
+    }
+  );
+
+  if (!savedResponse.ok) {
+    throw new Error("Unable to verify saved recipe ownership.");
+  }
+
+  const savedData = await savedResponse.json();
+  if (!savedData.data?.length) {
+    throw new Error("Recipe was not found in your collection.");
+  }
+
+  const recipeResponse = await fetch(
+    `${STRAPI_URL}/api/recipes/${encodeURIComponent(documentId)}?populate=*`,
+    {
+      headers: { Authorization: `Bearer ${STRAPI_API_TOKEN}` },
+      cache: "no-store",
+    }
+  );
+
+  if (!recipeResponse.ok) {
+    throw new Error("Saved recipe is no longer available.");
+  }
+
+  const recipeData = await recipeResponse.json();
+  const recipe = recipeData.data;
+  if (!recipe?.documentId) {
+    throw new Error("Saved recipe is no longer available.");
+  }
+
+  report("recipe_lookup", "completed", "Saved recipe opened.");
+  report("preparing", "started", "Preparing recipe details.");
+  report("preparing", "completed", "Recipe details prepared.");
+  report("completed", "completed", "Recipe ready.");
+  console.info(
+    `[recipe-detail] saved-hit total=${Math.round(
+      performance.now() - startedAt
+    )}ms`
+  );
+
+  return {
+    success: true,
+    recipe,
+    recipeId: recipe.documentId || recipe.id,
+    recipeDocumentId: recipe.documentId,
+    isSaved: true,
+    fromDatabase: true,
+    isPro: user.subscriptionTier === "pro",
+    message: "Recipe loaded from your collection",
+  };
 }
 
 async function resolveRecipeDetail(
@@ -1276,16 +1358,40 @@ Rules:
 
 
 // Get user's saved recipes
-export async function getSavedRecipes() {
+export async function getSavedRecipes(page = 1, pageSize = 12) {
   try {
     const user = await checkUser();
     if (!user) {
-      throw new Error("User not authenticated");
+      return {
+        success: false,
+        code: "UNAUTHENTICATED",
+        message: "Please sign in to view your recipes.",
+      };
     }
 
-    // Fetch saved recipes with populated recipe data
+    const safePage = Math.max(1, Number(page) || 1);
+    const safePageSize = Math.min(24, Math.max(1, Number(pageSize) || 12));
+    const recipeFields = [
+      "documentId",
+      "title",
+      "description",
+      "cuisine",
+      "imageUrl",
+      "prepTime",
+      "cookTime",
+      "servings",
+    ];
+    const recipeFieldQuery = recipeFields
+      .map(
+        (field, index) =>
+          `populate[recipe][fields][${index}]=${encodeURIComponent(field)}`
+      )
+      .join("&");
+
     const response = await fetch(
-      `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${user.id}&populate[recipe][populate]=*&sort=savedAt:desc`,
+      `${STRAPI_URL}/api/saved-recipes?filters[user][id][$eq]=${encodeURIComponent(
+        user.id
+      )}&${recipeFieldQuery}&fields[0]=documentId&fields[1]=saveAt&sort=saveAt:desc&pagination[page]=${safePage}&pagination[pageSize]=${safePageSize}&pagination[withCount]=true`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
@@ -1300,18 +1406,31 @@ export async function getSavedRecipes() {
 
     const data = await response.json();
 
-    // Extract recipes from saved-recipes relations
-    const recipes = data.data
-      .map((savedRecipe) => savedRecipe.recipe)
-      .filter(Boolean); // Remove any null recipes
+    const savedRecipes = (Array.isArray(data.data) ? data.data : [])
+      .filter((savedRecipe) => savedRecipe?.recipe)
+      .map((savedRecipe) => ({
+        ...savedRecipe.recipe,
+        savedRecipeDocumentId: savedRecipe.documentId,
+        savedAt: savedRecipe.saveAt || null,
+      }));
 
     return {
       success: true,
-      recipes,
-      count: recipes.length,
+      recipes: savedRecipes,
+      count: data.meta?.pagination?.total ?? savedRecipes.length,
+      pagination: data.meta?.pagination || {
+        page: safePage,
+        pageSize: safePageSize,
+        pageCount: safePage,
+        total: savedRecipes.length,
+      },
     };
   } catch (error) {
     console.error("Error fetching saved recipes:", error);
-    throw new Error(error.message || "Failed to load saved recipes");
+    return {
+      success: false,
+      code: error?.code || "STRAPI_ERROR",
+      message: "Unable to load your saved recipes. Please try again.",
+    };
   }
 }

@@ -45,6 +45,7 @@ function RecipeContent() {
   const router = useRouter();
 
   const recipeName = searchParams.get("cook");
+  const savedRecipeDocumentId = searchParams.get("recipeDocumentId");
   const pantryFingerprint = searchParams.get("pantryFingerprint");
 
   const [recipe, setRecipe] = useState(null);
@@ -73,9 +74,11 @@ function RecipeContent() {
 
   // Fetch recipe on mount
   useEffect(() => {
-    if (!recipeName) return;
+    if (!recipeName && !savedRecipeDocumentId) return;
 
-    const requestKey = `${recipeName}:${pantryFingerprint || "saved"}`;
+    const requestKey = `${savedRecipeDocumentId || recipeName}:${
+      pantryFingerprint || "saved"
+    }`;
 
     requestedRecipeKey.current = requestKey;
 
@@ -103,7 +106,12 @@ function RecipeContent() {
     const loadRecipe = async () => {
       try {
         const formData = new FormData();
-        formData.append("recipeName", recipeName);
+        if (recipeName) {
+          formData.append("recipeName", recipeName);
+        }
+        if (savedRecipeDocumentId) {
+          formData.append("recipeDocumentId", savedRecipeDocumentId);
+        }
         if (pantryFingerprint) {
           formData.append("pantryFingerprint", pantryFingerprint);
         }
@@ -188,7 +196,7 @@ function RecipeContent() {
         requestedRecipeKey.current = null;
       }
     };
-  }, [recipeName, pantryFingerprint]);
+  }, [recipeName, savedRecipeDocumentId, pantryFingerprint]);
 
   // Toggle save / unsave
   const handleToggleSave = async () => {
@@ -264,7 +272,7 @@ function RecipeContent() {
   };
 
   // No recipe name in URL
-  if (!recipeName) {
+  if (!recipeName && !savedRecipeDocumentId) {
     return (
       <div className="min-h-screen bg-stone-50 px-4 pb-16 pt-12">
         <div className="container mx-auto max-w-4xl py-20 text-center">
@@ -307,7 +315,7 @@ function RecipeContent() {
             <p className="font-light text-stone-600">
               Our AI chef is crafting detailed instructions for{" "}
               <span className="font-bold text-orange-600">
-                {recipeName}
+                {recipeName || "your saved recipe"}
               </span>
             </p>
 
