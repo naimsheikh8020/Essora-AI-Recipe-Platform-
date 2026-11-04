@@ -1,4 +1,5 @@
 
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useEffect, useRef, useState, Suspense } from "react";
@@ -75,8 +76,6 @@ function RecipeContent() {
     if (!recipeName) return;
 
     const requestKey = `${recipeName}:${pantryFingerprint || "saved"}`;
-
-    if (requestedRecipeKey.current === requestKey) return;
 
     requestedRecipeKey.current = requestKey;
 
@@ -183,7 +182,12 @@ function RecipeContent() {
 
     loadRecipe();
 
-    return () => abortController.abort();
+    return () => {
+      abortController.abort();
+      if (requestedRecipeKey.current === requestKey) {
+        requestedRecipeKey.current = null;
+      }
+    };
   }, [recipeName, pantryFingerprint]);
 
   // Toggle save / unsave

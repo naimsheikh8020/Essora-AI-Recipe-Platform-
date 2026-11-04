@@ -4,8 +4,11 @@ const STRAPI_URL =
   process.env.NEXT_PUBLIC_STRAPI_URL || "http://localhost:1337";
 
 const STRAPI_API_TOKEN = process.env.STRAPI_API_TOKEN;
+const VERIFIED_USER_TTL = 30_000;
+const verifiedUsers = new Map();
+const userLookupsInFlight = new Map();
 
-const fetchStrapiWithRetry = async (url, options, operation) => {
+const fetchStrapiWithRetryUncoalesced = async (url, options, operation) => {
   let lastError;
 
   for (let attempt = 1; attempt <= 2; attempt += 1) {
@@ -29,6 +32,28 @@ const fetchStrapiWithRetry = async (url, options, operation) => {
   throw lastError;
 };
 
+const fetchStrapiWithRetry = (url, options, operation) => {
+  if (operation !== "user lookup") {
+    return fetchStrapiWithRetryUncoalesced(url, options, operation);
+  }
+
+  const existing = userLookupsInFlight.get(url);
+  if (existing) return existing;
+
+  const request = fetchStrapiWithRetryUncoalesced(url, options, operation);
+  userLookupsInFlight.set(url, request);
+  request.then(() => {
+    if (userLookupsInFlight.get(url) === request) {
+      userLookupsInFlight.delete(url);
+    }
+  }, () => {
+    if (userLookupsInFlight.get(url) === request) {
+      userLookupsInFlight.delete(url);
+    }
+  });
+  return request;
+};
+
 export const checkUser = async (requestId = "unattributed") => {
   const startedAt = performance.now();
   const authStartedAt = performance.now();
@@ -47,6 +72,33 @@ export const checkUser = async (requestId = "unattributed") => {
 
   const subscriptionTier = has({plan: "pro"}) ? "pro" : "free";
   try {
+    const cached = verifiedUsers.get(userId);
+    if (cached && cached.expiresAt > Date.now()) {
+      if (cached.user.subscriptionTier !== subscriptionTier) {
+        const updateResponse = await fetch(
+          `${STRAPI_URL}/api/users/${cached.user.id}`,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${STRAPI_API_TOKEN}`,
+            },
+            body: JSON.stringify({ subscriptionTier }),
+          }
+        );
+
+        if (!updateResponse.ok) {
+          return null;
+        }
+
+        cached.user = { ...cached.user, subscriptionTier };
+      }
+
+      return { ...cached.user, clerkId: userId, subscriptionTier };
+    }
+
+    verifiedUsers.delete(userId);
+
     // Check if user exists in Strapi
     const lookupStartedAt = performance.now();
     const existingUserResponse = await fetchStrapiWithRetry(
@@ -86,6 +138,11 @@ export const checkUser = async (requestId = "unattributed") => {
           body: JSON.stringify({ subscriptionTier }),
         });
       }
+
+      verifiedUsers.set(userId, {
+        user: { ...existingUser },
+        expiresAt: Date.now() + VERIFIED_USER_TTL,
+      });
 
       if (process.env.NODE_ENV === "development") {
         console.info(

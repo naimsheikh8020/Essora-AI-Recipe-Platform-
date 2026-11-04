@@ -21,6 +21,50 @@ const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY;
 
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 
+function isTransientGeminiError(error) {
+  const message = String(error?.message || error);
+  return /\[(429|500|502|503|504)\b/.test(message) ||
+    /high demand|temporarily unavailable|overloaded/i.test(message);
+}
+
+async function generateRecipeContent(prompt) {
+  const primaryModel =
+    process.env.GEMINI_RECIPE_MODEL || "gemini-3.5-flash-lite";
+  const fallbackModel =
+    process.env.GEMINI_RECIPE_FALLBACK_MODEL || "gemini-2.5-flash";
+  const models = [primaryModel, fallbackModel].filter(
+    (model, index, list) => model && list.indexOf(model) === index
+  );
+  let lastError;
+
+  for (const modelName of models) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        generationConfig: {
+          responseMimeType: "application/json",
+          temperature: 0.4,
+          maxOutputTokens: 2600,
+          thinkingConfig: { thinkingLevel: "low" },
+        },
+      });
+
+      return await model.generateContent(prompt, { timeout: 90_000 });
+    } catch (error) {
+      lastError = error;
+      if (!isTransientGeminiError(error) || modelName === models.at(-1)) {
+        throw error;
+      }
+      console.warn(
+        `[recipe-detail] Gemini model ${modelName} unavailable; ` +
+          `falling back to ${models[models.indexOf(modelName) + 1]}`
+      );
+    }
+  }
+
+  throw lastError;
+}
+
 function normalizeIngredientName(name) {
   return typeof name === "string" ? name.trim().toLowerCase() : "";
 }
@@ -366,7 +410,7 @@ async function resolveRecipeDetail(
     report("recipe_lookup", "started", "Checking whether the recipe already exists.");
     const lookupStartedAt = performance.now();
     const searchResponse = await fetch(
-      `${STRAPI_URL}/api/recipes?${recipeFilters.join("&")}&populate=*`,
+      `${STRAPI_URL}/api/recipes?${recipeFilters.join("&")}`,
       {
         headers: {
           Authorization: `Bearer ${STRAPI_API_TOKEN}`,
@@ -447,10 +491,6 @@ async function resolveRecipeDetail(
     ]);
     report("recipe_lookup", "completed", "No existing recipe found.");
     report("generation", "started", "Generating recipe with Our AI Chef.");
-    const model = genAI.getGenerativeModel({
-      model: "gemini-3.5-flash-lite",
-    });
-
     const prompt = `
 You are a professional chef and recipe expert. Generate a detailed recipe for: "${normalizedTitle}"
 
@@ -522,8 +562,12 @@ Guidelines:
 - Keep total instructions under 12 steps
 `;
 
+    report("image", "started", "Finding a recipe image.");
+    const imageStartedAt = performance.now();
+    const imagePromise = fetchRecipeImage(normalizedTitle);
+
     const geminiStartedAt = performance.now();
-    const result = await model.generateContent(prompt);
+    const result = await generateRecipeContent(prompt);
     const response = await result.response;
     const text = response.text();
     console.info(
@@ -569,10 +613,8 @@ Guidelines:
         ? recipeData.cuisine.trim()
         : "International";
 
-    // Step 3: Fetch image from Unsplash
-    report("image", "started", "Finding a recipe image.");
-    const imageStartedAt = performance.now();
-    const imageUrl = await fetchRecipeImage(normalizedTitle);
+    // Image lookup runs while Gemini is generating.
+    const imageUrl = await imagePromise;
     console.info(
       `[recipe-detail] image=${Math.round(
         performance.now() - imageStartedAt
